@@ -229,6 +229,14 @@ label{display:block;font-size:11px;color:var(--text3);margin-bottom:5px;text-tra
 .section-label.inversion{background:rgba(155,89,182,.15);color:var(--purple)}
 .storage-bar{height:4px;border-radius:2px;background:var(--bg3);margin-top:6px}
 .storage-bar .fill{height:100%;border-radius:2px;background:var(--green);transition:width .4s}
+ 
+.cal-list{display:grid;gap:8px;margin-top:10px}
+.cal-item{display:flex;justify-content:space-between;gap:10px;padding:9px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg3);font-size:13px}
+.cal-item .date{color:var(--text3);min-width:54px}.cal-item .concept{flex:1}.cal-item .amount{font-weight:700}.cal-item.ing .amount{color:var(--green)}.cal-item.gas .amount{color:var(--amber)}
+.forecast-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin-bottom:20px}
+.forecast-month{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:14px}
+.forecast-month .title{font-weight:700;margin-bottom:8px}.status-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}.dot-green{background:var(--green)}.dot-amber{background:var(--amber)}.dot-red{background:var(--red)}
+.checklist{display:grid;gap:10px}.check-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg3);font-size:13px}.check-item input{width:auto}.help-note{font-size:12px;color:var(--text3);line-height:1.45}.pill{display:inline-block;padding:3px 8px;border-radius:999px;background:var(--bg3);border:1px solid var(--border);font-size:11px;color:var(--text2)}
 </style>
 </head>
 <body>
@@ -243,9 +251,11 @@ label{display:block;font-size:11px;color:var(--text3);margin-bottom:5px;text-tra
   <div class="nav-item" onclick="nav('ahorro')"><span class="icon">🏦</span>Ahorro</div>
   <div class="nav-item" onclick="nav('inversiones')"><span class="icon">📈</span>Inversiones</div>
   <div class="nav-item" onclick="nav('productos')"><span class="icon">💎</span>Productos financieros</div>
+  <div class="nav-item" onclick="nav('traspasos')"><span class="icon">🔁</span>Traspasos internos</div>
   <div class="nav-item" onclick="nav('agrupaciones')"><span class="icon">🎯</span>Agrupaciones</div>
   <div class="nav-item" onclick="nav('objetivos')"><span class="icon">🏆</span>Objetivos</div>
   <div class="nav-item" onclick="nav('informes')"><span class="icon">📉</span>Informes</div>
+  <div class="nav-item" onclick="nav('revision')"><span class="icon">✅</span>Revisión mensual</div>
   <div class="nav-item" onclick="nav('config')"><span class="icon">⚙️</span>Configuración</div>
   <div class="nav-item" onclick="nav('datos')"><span class="icon">💾</span>Importar / Exportar</div>
 </nav>
@@ -296,6 +306,8 @@ label{display:block;font-size:11px;color:var(--text3);margin-bottom:5px;text-tra
   </div>
   <div class="alert alert-info mb16">ℹ️ Aquí puedes registrar ingresos y gastos que sabes que llegarán: sueldo mensual, pagas extra, hipoteca, seguros anuales, IBI, suscripciones o pagos puntuales. El selector muestra desde el mes actual hasta final de año y los 3 primeros meses del año siguiente.</div>
   <div id="prev-summary" class="cards mb24"></div>
+  <div class="panel mb24"><h3>Semáforo de liquidez: próximos meses</h3><div class="help-note mb16">Verde: margen cómodo. Ámbar: margen justo. Rojo: gastos previstos superiores a ingresos previstos.</div><div id="forecast-year-wrap" class="forecast-grid"></div></div>
+  <div class="panel mb24"><h3>Calendario financiero del mes seleccionado</h3><div id="financial-calendar-wrap" class="cal-list"></div></div>
   <div class="row2">
     <div class="panel"><h3>Ingresos previstos del mes</h3><div id="ing-prev-table-wrap"></div></div>
     <div class="panel"><h3>Gastos previstos del mes</h3><div id="prev-table-wrap"></div></div>
@@ -353,6 +365,17 @@ label{display:block;font-size:11px;color:var(--text3);margin-bottom:5px;text-tra
     <button class="btn btn-primary btn-sm" onclick="openProdModal()">+ Nuevo producto</button>
   </div>
   <div id="prod-list"></div>
+</section>
+ 
+<!-- TRASPASOS INTERNOS -->
+<section class="section" id="s-traspasos">
+  <div class="flex gap12 jcsb mb24">
+    <h2 style="margin:0">Traspasos internos</h2>
+    <button class="btn btn-primary btn-sm" onclick="openTraspasoModal()">+ Nuevo traspaso</button>
+  </div>
+  <div class="alert alert-info mb16">ℹ️ Usa esta sección para mover dinero entre productos: por ejemplo, del colchón de seguridad a un fondo indexado. No cuenta como gasto, ingreso ni pérdida; solo cambia el dinero de sitio.</div>
+  <div id="traspasos-summary" class="cards mb24"></div>
+  <div class="panel"><div id="traspasos-table-wrap"></div></div>
 </section>
  
 <!-- AGRUPACIONES -->
@@ -445,6 +468,16 @@ label{display:block;font-size:11px;color:var(--text3);margin-bottom:5px;text-tra
     <p style="font-size:12px;color:var(--text3);margin-bottom:12px">Los tipos válidos son: <code style="background:var(--bg3);padding:2px 6px;border-radius:4px">ingreso | gasto | ahorro | aportacion</code></p>
     <input type="file" id="import-csv" accept=".csv" onchange="importCSV(this)">
   </div>
+  <div class="panel mt16"><h3 class="mb16">Mantenimiento de datos</h3><p class="help-note mb16">Usa estos botones solo si quieres empezar desde cero o cargar datos ficticios para hacer pruebas.</p><div class="flex gap8"><button class="btn btn-danger" onclick="resetAppData()">Empezar desde cero</button><button class="btn btn-ghost" onclick="loadDemoManually()">Cargar datos demo</button></div></div>
+</section>
+ 
+<!-- REVISION MENSUAL -->
+<section class="section" id="s-revision">
+  <h2>Revisión mensual guiada</h2>
+  <div class="alert alert-info mb16">ℹ️ Esta checklist te ayuda a revisar la app cada mes sin mezclar gastos, aportaciones y traspasos.</div>
+  <div class="cards" id="revision-cards"></div>
+  <div class="panel mb24"><h3>Checklist del mes</h3><div id="revision-checklist" class="checklist"></div><button class="btn btn-primary mt16" onclick="saveRevisionChecklist()">Guardar revisión</button></div>
+  <div class="panel"><h3>Regla contable rápida</h3><p class="help-note"><strong>Gasto</strong> = dinero que sale de tu patrimonio. <strong>Aportación</strong> = dinero que pasa de efectivo a inversión. <strong>Traspaso interno</strong> = dinero que cambia de un producto a otro. <strong>Rentabilidad</strong> = cambio de valor del producto, no movimiento de dinero.</p></div>
 </section>
  
 </main>
@@ -472,6 +505,7 @@ label{display:block;font-size:11px;color:var(--text3);margin-bottom:5px;text-tra
   <div class="form-row cols2"><div><label>Importe previsto (€)</label><input type="number" id="prev-importe" step="0.01" placeholder="0.00" min="0"></div><div><label>Categoría</label><select id="prev-categoria"></select></div></div>
   <div class="form-row cols3"><div><label>Frecuencia</label><select id="prev-frecuencia"><option value="mensual">Mensual</option><option value="trimestral">Trimestral</option><option value="semestral">Semestral</option><option value="anual">Anual</option><option value="puntual">Una vez</option></select></div><div><label>Día aproximado</label><input type="number" id="prev-dia" min="1" max="31" value="1"></div><div><label>Mes de referencia</label><select id="prev-mes"></select></div></div>
   <div class="form-row cols2"><div><label>Año, si es puntual</label><input type="number" id="prev-anio" min="2020" max="2035"></div><div><label>Método / cuenta</label><select id="prev-metodo"></select></div></div>
+  <div class="form-row cols2"><div><label>Fecha de inicio</label><input type="date" id="prev-inicio"></div><div><label>Fecha de fin opcional</label><input type="date" id="prev-fin"></div></div>
   <div class="form-row"><label><input type="checkbox" id="prev-activo" style="width:auto;margin-right:6px" checked> Activo</label></div>
   <div class="form-row"><label>Comentario</label><textarea id="prev-comentario" placeholder="Opcional..."></textarea></div>
   <div class="flex gap8 mt16"><button class="btn btn-primary" onclick="savePrevisto()">Guardar</button><button class="btn btn-ghost" onclick="closeModal('prev-modal')">Cancelar</button></div>
@@ -486,6 +520,7 @@ label{display:block;font-size:11px;color:var(--text3);margin-bottom:5px;text-tra
   <div class="form-row cols2"><div><label>Importe previsto (€)</label><input type="number" id="ing-prev-importe" step="0.01" placeholder="0.00" min="0"></div><div><label>Método / cuenta</label><select id="ing-prev-metodo"></select></div></div>
   <div class="form-row cols3"><div><label>Frecuencia</label><select id="ing-prev-frecuencia"><option value="mensual">Mensual</option><option value="trimestral">Trimestral</option><option value="semestral">Semestral</option><option value="anual">Anual</option><option value="puntual">Una vez</option></select></div><div><label>Día aproximado</label><input type="number" id="ing-prev-dia" min="1" max="31" value="1"></div><div><label>Mes de referencia</label><select id="ing-prev-mes"></select></div></div>
   <div class="form-row cols2"><div><label>Año, si es puntual</label><input type="number" id="ing-prev-anio" min="2020" max="2035"></div><div><label><input type="checkbox" id="ing-prev-activo" style="width:auto;margin-right:6px" checked> Activo</label></div></div>
+  <div class="form-row cols2"><div><label>Fecha de inicio</label><input type="date" id="ing-prev-inicio"></div><div><label>Fecha de fin opcional</label><input type="date" id="ing-prev-fin"></div></div>
   <div class="form-row"><label>Comentario</label><textarea id="ing-prev-comentario" placeholder="Opcional..."></textarea></div>
   <div class="flex gap8 mt16"><button class="btn btn-primary" onclick="saveIngresoPrevisto()">Guardar</button><button class="btn btn-ghost" onclick="closeModal('ing-prev-modal')">Cancelar</button></div>
 </div></div>
@@ -515,6 +550,7 @@ label{display:block;font-size:11px;color:var(--text3);margin-bottom:5px;text-tra
   <div class="form-row cols2"><div><label>Nombre</label><input type="text" id="prod-nombre" placeholder="Ej: Fidelity MSCI World"></div><div><label>Tipo</label><select id="prod-tipo"><option value="colchon">🛡️ Colchón de seguridad</option><option value="ahorro_conservador">💙 Ahorro conservador</option><option value="fondo_indexado">📈 Fondo indexado</option><option value="etf">📊 ETF</option><option value="fondo_activo">🎯 Fondo activo</option><option value="fondo_monetario">💰 Fondo monetario</option><option value="acciones">📉 Acciones</option><option value="otro">📦 Otro</option></select></div></div>
   <div class="form-row cols2"><div><label>Entidad</label><input type="text" id="prod-entidad" placeholder="Ej: Entidad demo"></div><div><label>ISIN (opcional)</label><input type="text" id="prod-isin" placeholder="Ej: Identificador demo"></div></div>
   <div class="form-row cols2"><div><label>Nivel de riesgo</label><select id="prod-riesgo"><option value="muy_bajo">Muy bajo</option><option value="bajo">Bajo</option><option value="medio">Medio</option><option value="alto">Alto</option><option value="muy_alto">Muy alto</option></select></div><div><label>Capital inicial aportado (€)</label><input type="number" id="prod-capital" step="0.01" placeholder="0.00" min="0"></div></div>
+  <div class="form-row"><label>Fiscalidad básica</label><select id="prod-fiscalidad"><option value="no_indicada">No indicada</option><option value="fondo_traspasable">Fondo traspasable</option><option value="etf_no_traspasable">ETF no traspasable fiscalmente</option><option value="accion">Acción</option><option value="cuenta">Cuenta / depósito</option><option value="otro">Otro</option></select></div>
   <div class="form-row"><label>Comentario</label><textarea id="prod-comentario"></textarea></div>
   <div class="flex gap8 mt16"><button class="btn btn-primary" onclick="saveProducto()">Guardar</button><button class="btn btn-ghost" onclick="closeModal('prod-modal')">Cancelar</button></div>
 </div></div>
@@ -528,6 +564,18 @@ label{display:block;font-size:11px;color:var(--text3);margin-bottom:5px;text-tra
   <div class="form-row cols2"><div><label>Aportación este mes (€)</label><input type="number" id="seg-aportacion" step="0.01" value="0" min="0"></div><div><label>Valor de mercado (€)</label><input type="number" id="seg-valor" step="0.01" placeholder="0.00" min="0"></div></div>
   <div class="form-row"><label>Comentario</label><textarea id="seg-comentario"></textarea></div>
   <div class="flex gap8 mt16"><button class="btn btn-primary" onclick="saveSeguimiento()">Guardar</button><button class="btn btn-ghost" onclick="closeModal('seg-modal')">Cancelar</button></div>
+</div></div>
+ 
+<!-- MODAL TRASPASO INTERNO -->
+<div class="modal-bg" id="traspaso-modal">
+<div class="modal">
+  <h3 id="traspaso-modal-title">Nuevo traspaso interno</h3>
+  <input type="hidden" id="traspaso-id">
+  <div class="form-row cols2"><div><label>Fecha</label><input type="date" id="traspaso-fecha"></div><div><label>Importe (€)</label><input type="number" id="traspaso-importe" step="0.01" placeholder="0.00" min="0"></div></div>
+  <div class="form-row cols2"><div><label>Producto origen</label><select id="traspaso-origen"></select></div><div><label>Producto destino</label><select id="traspaso-destino"></select></div></div>
+  <div class="form-row"><label>Motivo / comentario</label><textarea id="traspaso-comentario" placeholder="Ej: rebalanceo, pasar exceso de colchón a inversión..."></textarea></div>
+  <div class="alert alert-info">Este movimiento no afecta a tus ingresos, gastos ni ahorro neto. Reduce el valor del producto origen y aumenta el del producto destino.</div>
+  <div class="flex gap8 mt16"><button class="btn btn-primary" onclick="saveTraspaso()">Guardar traspaso</button><button class="btn btn-ghost" onclick="closeModal('traspaso-modal')">Cancelar</button></div>
 </div></div>
  
 <!-- MODAL AGRUPACION -->
@@ -557,12 +605,14 @@ const TIPOS_INVERSION = new Set(['fondo_indexado','etf','fondo_activo','fondo_mo
 const TIPOS_AHORRO = new Set(['colchon','ahorro_conservador']);
  
 let db = {
-  movimientos:[],productos:[],seguimiento:[],gastosPrevistos:[],ingresosPrevistos:[],
+  movimientos:[],productos:[],seguimiento:[],traspasos:[],gastosPrevistos:[],ingresosPrevistos:[],
   categorias:['Vivienda','Alimentación','Transporte','Ocio','Salud','Mascota','Formación','Viajes','Suscripciones','Otros'],
   catColores:{Vivienda:'#e74c3c',Alimentación:'#f39c12',Transporte:'#3498db',Ocio:'#9b59b6',Salud:'#2ecc71',Mascota:'#1abc9c',Formación:'#e67e22',Viajes:'#16a085',Suscripciones:'#8e44ad',Otros:'#7f8c8d'},
   metodos:['Cuenta corriente','Tarjeta crédito','Efectivo','Bizum'],
   grupos:[],
   objetivos:{ahorro:0,inversion:0,patrimonio:0,emergencia:0},
+  checklist:{},
+  meta:{lastBackup:null,demoLoaded:false},
   config:{limites:{},alertas:{ahorro:true,gasto:true,inversion:true,colchon:3000}}
 };
  
@@ -611,7 +661,7 @@ async function loadDB() {
     const parsed = await idbGet(IDB_RECORD_ID);
     if (!parsed) return;
     // Validación de esquema: solo copiamos campos conocidos
-    const validKeys = ['movimientos','productos','seguimiento','gastosPrevistos','ingresosPrevistos','categorias','catColores','metodos','grupos','objetivos','config'];
+    const validKeys = ['movimientos','productos','seguimiento','traspasos','gastosPrevistos','ingresosPrevistos','categorias','catColores','metodos','grupos','objetivos','checklist','meta','config'];
     validKeys.forEach(k => { if (parsed[k] !== undefined) db[k] = parsed[k]; });
   } catch(e) {
     console.warn('Error al cargar datos desde IndexedDB:', e);
@@ -673,26 +723,50 @@ function buildChart(id,cfg){destroyChart(id);const el=document.getElementById(id
 // ============================================================
  
 // Suma aportaciones reales de seguimiento (sin capitalInicial para evitar doble conteo)
-function getSegsAportacion(prodId) {
-  return db.seguimiento.filter(s=>s.prodId===prodId).reduce((s,sg)=>s+(parseFloat(sg.aportacion)||0),0);
+function getSegsAportacion(prodId, cutoffKey=null) {
+  return db.seguimiento
+    .filter(s=>s.prodId===prodId && (!cutoffKey || ym2str(s.anio,s.mes)<=cutoffKey))
+    .reduce((s,sg)=>s+(parseFloat(sg.aportacion)||0),0);
 }
  
-// Capital total aportado a un producto = capitalInicial + todas las aportaciones de seguimiento
-function getCapitalTotalProducto(p) {
-  return (parseFloat(p.capitalInicial)||0) + getSegsAportacion(p.id);
+function getTransferDelta(prodId, cutoffKey=null, afterKey=null) {
+  return (db.traspasos||[]).filter(t=>{
+    const key=(t.fecha||'').slice(0,7);
+    if(cutoffKey && key>cutoffKey) return false;
+    if(afterKey && key<=afterKey) return false;
+    return t.origenProdId===prodId || t.destinoProdId===prodId;
+  }).reduce((sum,t)=>{
+    const imp=parseFloat(t.importe)||0;
+    if(t.destinoProdId===prodId) return sum+imp;
+    if(t.origenProdId===prodId) return sum-imp;
+    return sum;
+  },0);
+}
+ 
+// Capital total ajustado por traspasos internos.
+// Un traspaso desde un producto reduce su capital; hacia otro lo aumenta.
+// Así no aparece como pérdida: el patrimonio total se mantiene.
+function getCapitalTotalProducto(p, cutoffKey=null) {
+  return (parseFloat(p.capitalInicial)||0) + getSegsAportacion(p.id, cutoffKey) + getTransferDelta(p.id, cutoffKey);
 }
  
 // Último seguimiento registrado para un producto
-function getLastSeg(prodId) {
-  const segs=db.seguimiento.filter(s=>s.prodId===prodId);
+function getLastSeg(prodId, cutoffKey=null) {
+  let segs=db.seguimiento.filter(s=>s.prodId===prodId);
+  if(cutoffKey) segs=segs.filter(s=>ym2str(s.anio,s.mes)<=cutoffKey);
   if(!segs.length) return null;
-  return segs.sort((a,b)=>b.anio-a.anio||b.mes-a.mes)[0];
+  return segs.sort((a,b)=>(b.anio-a.anio)||(b.mes-a.mes)||String(b.createdAt||'').localeCompare(String(a.createdAt||'')))[0];
 }
  
-// Valor actual de un producto (último seguimiento o capitalInicial si no hay)
-function getValorProducto(p) {
-  const last=getLastSeg(p.id);
-  return last ? (parseFloat(last.valorMercado)||0) : (parseFloat(p.capitalInicial)||0);
+// Valor actual de un producto: último valor registrado + traspasos posteriores.
+// Si no hay seguimiento, parte del capital inicial y aplica traspasos.
+function getValorProducto(p, cutoffKey=null) {
+  const last=getLastSeg(p.id, cutoffKey);
+  if(last) {
+    const lastKey=ym2str(last.anio,last.mes);
+    return (parseFloat(last.valorMercado)||0) + getTransferDelta(p.id, cutoffKey, lastKey);
+  }
+  return (parseFloat(p.capitalInicial)||0) + getTransferDelta(p.id, cutoffKey);
 }
  
 // --- SEPARACIÓN AHORRO vs INVERSIÓN ---
@@ -731,15 +805,8 @@ function getPatrimonio() {
  
 function calcPatrimonioMes(y,m) {
   const key=ym2str(y,m);
-  // Valor productos hasta ese mes
-  const totalProductos = db.productos.reduce((sum,p)=>{
-    const pSegs=db.seguimiento.filter(s=>s.prodId===p.id&&ym2str(s.anio,s.mes)<=key);
-    if(!pSegs.length) return sum+(parseFloat(p.capitalInicial)||0);
-    const last=pSegs.sort((a,b)=>b.anio-a.anio||b.mes-a.mes)[0];
-    return sum+(parseFloat(last.valorMercado)||0);
-  },0);
-  // Efectivo hasta ese mes
-  const movsBefore=db.movimientos.filter(mv=>mv.fecha<=key+'--');
+  const totalProductos = db.productos.reduce((sum,p)=>sum+getValorProducto(p, key),0);
+  const movsBefore=db.movimientos.filter(mv=>mv.fecha<=key+'-31');
   const ing=movsBefore.filter(m=>m.tipo==='ingreso').reduce((s,m)=>s+(parseFloat(m.importe)||0),0);
   const gas=movsBefore.filter(m=>m.tipo==='gasto').reduce((s,m)=>s+(parseFloat(m.importe)||0),0);
   const ap=movsBefore.filter(m=>m.tipo==='aportacion').reduce((s,m)=>s+(parseFloat(m.importe)||0),0);
@@ -754,7 +821,7 @@ function nav(id) {
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   document.getElementById('s-'+id).classList.add('active');
   document.querySelectorAll('.nav-item').forEach(n=>{if(n.getAttribute('onclick')===`nav('${id}')`)n.classList.add('active');});
-  const m={dashboard:renderDashboard,movimientos:renderMovimientos,gastosprevistos:renderGastosPrevistos,categorias:renderCategorias,ahorro:renderAhorro,inversiones:renderInversiones,productos:renderProductos,agrupaciones:renderAgrupaciones,objetivos:renderObjetivos,informes:renderInformes,config:renderConfig,datos:renderDatos};
+  const m={dashboard:renderDashboard,movimientos:renderMovimientos,gastosprevistos:renderGastosPrevistos,categorias:renderCategorias,ahorro:renderAhorro,inversiones:renderInversiones,productos:renderProductos,traspasos:renderTraspasos,agrupaciones:renderAgrupaciones,objetivos:renderObjetivos,informes:renderInformes,revision:renderRevision,config:renderConfig,datos:renderDatos};
   if(m[id]) m[id]();
 }
  
@@ -827,6 +894,12 @@ function renderDashboard() {
  
   // Alertas
   const alerts=[];
+  if(db.meta && db.meta.lastBackup){
+    const days=Math.floor((Date.now()-new Date(db.meta.lastBackup).getTime())/(1000*60*60*24));
+    if(days>30) alerts.push({t:'warning',msg:`Hace ${days} días que no exportas una copia JSON. Conviene hacer una copia de seguridad.`});
+  } else {
+    alerts.push({t:'warning',msg:'Todavía no has exportado ninguna copia JSON. Haz una antes de introducir muchos datos reales.'});
+  }
   if(db.config.alertas.gasto&&gastos>prevGastos&&prevGastos>0)
     alerts.push({t:'warning',msg:`Gastos de este mes (${fmt(gastos)}) superiores al anterior (${fmt(prevGastos)}).`});
   if(db.config.alertas.ahorro&&db.objetivos.ahorro>0&&ahorroNeto<db.objetivos.ahorro)
@@ -948,7 +1021,7 @@ function saveMovimiento(){
     comentario:document.getElementById('mov-comentario').value
   };
   if(id){db.movimientos=db.movimientos.map(m=>m.id===id?mov:m);}
-  else{db.movimientos.push(mov);}
+  else{db.movimientos.push(mov); crearPrevistoDesdeMovimiento(mov);}
   saveDB();closeModal('mov-modal');renderMovimientos();
 }
  
@@ -958,6 +1031,9 @@ function saveMovimiento(){
 // ============================================================
 function previstoOcurreEnMes(g, y, m) {
   if (g.activo === false) return false;
+  const monthKey = ym2str(y,m);
+  if (g.fechaInicio && monthKey < String(g.fechaInicio).slice(0,7)) return false;
+  if (g.fechaFin && monthKey > String(g.fechaFin).slice(0,7)) return false;
   const refMonth = parseInt(g.mes || m);
   const freq = g.frecuencia || 'mensual';
   if (freq === 'mensual') return true;
@@ -972,6 +1048,41 @@ function getPrevistosMes(y, m) {
 }
 function getIngresosPrevistosMes(y, m) {
   return (db.ingresosPrevistos || []).filter(g => previstoOcurreEnMes(g, y, m));
+}
+ 
+function getForecastHorizonMonths() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m0 = now.getMonth() + 1;
+  const months=[];
+  for(let m=m0;m<=12;m++) months.push({y,m,key:ym2str(y,m),label:MESES[m-1]+' '+y});
+  for(let m=1;m<=3;m++) months.push({y:y+1,m,key:ym2str(y+1,m),label:MESES[m-1]+' '+(y+1)});
+  return months;
+}
+function forecastTotals(y,m){
+  const ing=getIngresosPrevistosMes(y,m).reduce((s,g)=>s+(parseFloat(g.importe)||0),0);
+  const gas=getPrevistosMes(y,m).reduce((s,g)=>s+(parseFloat(g.importe)||0),0);
+  const saldo=ing-gas;
+  const ratio=ing>0 ? saldo/ing : (saldo>=0?1:-1);
+  let status='green', label='Correcto';
+  if(saldo<0){status='red';label='Déficit previsto';}
+  else if(ratio<0.15){status='amber';label='Margen justo';}
+  return {ing,gas,saldo,status,label};
+}
+function renderForecastYearWrap(){
+  const el=document.getElementById('forecast-year-wrap'); if(!el) return;
+  el.innerHTML=getForecastHorizonMonths().map(({y,m,label})=>{
+    const t=forecastTotals(y,m);
+    return `<div class="forecast-month"><div class="title"><span class="status-dot dot-${t.status}"></span>${label}</div><div class="help-note">Ingresos: <strong>${fmt(t.ing)}</strong><br>Gastos: <strong>${fmt(t.gas)}</strong><br>Saldo: <strong class="${t.saldo>=0?'text-green':'text-red'}">${t.saldo>=0?'+':''}${fmt(t.saldo)}</strong><br><span class="pill">${t.label}</span></div></div>`;
+  }).join('');
+}
+function renderFinancialCalendar(y,m){
+  const el=document.getElementById('financial-calendar-wrap'); if(!el) return;
+  const ingresos=getIngresosPrevistosMes(y,m).map(x=>({...x,_tipo:'ing'}));
+  const gastos=getPrevistosMes(y,m).map(x=>({...x,_tipo:'gas'}));
+  const items=[...ingresos,...gastos].sort((a,b)=>(parseInt(a.dia)||1)-(parseInt(b.dia)||1));
+  if(!items.length){el.innerHTML='<div class="empty">No hay previsiones para este mes</div>';return;}
+  el.innerHTML=items.map(it=>`<div class="cal-item ${it._tipo}"><span class="date">Día ${it.dia||'—'}</span><span class="concept">${it._tipo==='ing'?'💚':'🧾'} ${escHtml(it.concepto)}</span><span class="amount">${it._tipo==='ing'?'+':'-'}${fmt(parseFloat(it.importe)||0)}</span></div>`).join('');
 }
 function estimarAnual(items) {
   return (items || []).reduce((sum,g)=>{
@@ -1007,6 +1118,8 @@ function renderGastosPrevistos() {
     <div class="card ${diferencia>=0?'green':'red'}"><div class="label">Diferencia vs real</div><div class="value">${diferencia>=0?'+':''}${fmt(diferencia)}</div><div class="sub">Saldo real − previsto</div></div>
     <div class="card purple"><div class="label">Ingresos anuales estim.</div><div class="value">${fmt(anualIngresos)}</div></div>
     <div class="card red"><div class="label">Gastos anuales estim.</div><div class="value">${fmt(anualGastos)}</div></div>`;
+  renderForecastYearWrap();
+  renderFinancialCalendar(y,m);
   renderIngresosPrevistosTable(ingresosPrevistos);
   renderGastosPrevistosTable(gastosPrevistos);
   buildChart('ch-prev',{type:'bar',data:{labels:['Ing. previsto','Gasto previsto','Ing. real','Gasto real'],datasets:[{data:[totalIngresoPrevisto,totalGastoPrevisto,totalIngresoReal,totalGastoReal],backgroundColor:['#2ecc71','#f39c12','#1abc9c','#e74c3c'],borderRadius:6}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>v+'€'},grid:{color:'rgba(255,255,255,0.05)'}},x:{grid:{display:false}}}}});
@@ -1045,6 +1158,8 @@ function openPrevistoModal(id){
     document.getElementById('prev-anio').value=g.anio||y;
     document.getElementById('prev-metodo').value=g.metodo||'';
     document.getElementById('prev-activo').checked=g.activo!==false;
+    document.getElementById('prev-inicio').value=g.fechaInicio||'';
+    document.getElementById('prev-fin').value=g.fechaFin||'';
     document.getElementById('prev-comentario').value=g.comentario||'';
   } else {
     document.getElementById('prev-modal-title').textContent='Nuevo gasto previsto';
@@ -1057,6 +1172,8 @@ function openPrevistoModal(id){
     document.getElementById('prev-anio').value=y;
     document.getElementById('prev-metodo').value=db.metodos[0]||'';
     document.getElementById('prev-activo').checked=true;
+    document.getElementById('prev-inicio').value=`${y}-${String(m).padStart(2,'0')}-01`;
+    document.getElementById('prev-fin').value='';
     document.getElementById('prev-comentario').value='';
   }
   openModal('prev-modal');
@@ -1076,6 +1193,8 @@ function openIngresoPrevistoModal(id){
     document.getElementById('ing-prev-anio').value=g.anio||y;
     document.getElementById('ing-prev-metodo').value=g.metodo||'';
     document.getElementById('ing-prev-activo').checked=g.activo!==false;
+    document.getElementById('ing-prev-inicio').value=g.fechaInicio||'';
+    document.getElementById('ing-prev-fin').value=g.fechaFin||'';
     document.getElementById('ing-prev-comentario').value=g.comentario||'';
   } else {
     document.getElementById('ing-prev-modal-title').textContent='Nuevo ingreso previsto';
@@ -1087,6 +1206,8 @@ function openIngresoPrevistoModal(id){
     document.getElementById('ing-prev-anio').value=y;
     document.getElementById('ing-prev-metodo').value=db.metodos[0]||'';
     document.getElementById('ing-prev-activo').checked=true;
+    document.getElementById('ing-prev-inicio').value=`${y}-${String(m).padStart(2,'0')}-01`;
+    document.getElementById('ing-prev-fin').value='';
     document.getElementById('ing-prev-comentario').value='';
   }
   openModal('ing-prev-modal');
@@ -1123,6 +1244,8 @@ async function savePrevisto(){
     mes:parseInt(document.getElementById('prev-mes').value)||1,
     anio:parseInt(document.getElementById('prev-anio').value)||new Date().getFullYear(),
     metodo:document.getElementById('prev-metodo').value,
+    fechaInicio:document.getElementById('prev-inicio').value,
+    fechaFin:document.getElementById('prev-fin').value,
     activo:document.getElementById('prev-activo').checked,
     comentario:document.getElementById('prev-comentario').value
   };
@@ -1144,6 +1267,8 @@ async function saveIngresoPrevisto(){
     mes:parseInt(document.getElementById('ing-prev-mes').value)||1,
     anio:parseInt(document.getElementById('ing-prev-anio').value)||new Date().getFullYear(),
     metodo:document.getElementById('ing-prev-metodo').value,
+    fechaInicio:document.getElementById('ing-prev-inicio').value,
+    fechaFin:document.getElementById('ing-prev-fin').value,
     activo:document.getElementById('ing-prev-activo').checked,
     comentario:document.getElementById('ing-prev-comentario').value
   };
@@ -1159,7 +1284,7 @@ function crearPrevistoDesdeMovimiento(mov){
     id:uid(), concepto:mov.concepto, importe:parseFloat(mov.importe)||0,
     frecuencia:document.getElementById('mov-prev-frecuencia').value||'mensual',
     dia:fecha.getDate(), mes:parseInt(document.getElementById('mov-prev-mes').value)||fecha.getMonth()+1,
-    anio:fecha.getFullYear(), metodo:mov.metodo||'', activo:true,
+    anio:fecha.getFullYear(), metodo:mov.metodo||'', fechaInicio:mov.fecha, fechaFin:'', activo:true,
     comentario:'Creado automáticamente desde un movimiento.'
   };
   if(mov.tipo==='gasto'){
@@ -1252,6 +1377,7 @@ function renderInversiones(){
 const tipoLabels={colchon:'🛡️ Colchón',ahorro_conservador:'💙 Ahorro conservador',fondo_indexado:'📈 Fondo indexado',etf:'📊 ETF',fondo_activo:'🎯 Fondo activo',fondo_monetario:'💰 Fondo monetario',acciones:'📉 Acciones',otro:'📦 Otro'};
 const riesgoLabel={muy_bajo:'Muy bajo',bajo:'Bajo',medio:'Medio',alto:'Alto',muy_alto:'Muy alto'};
 const riesgoCls={muy_bajo:'badge-blue',bajo:'badge-teal',medio:'badge-amber',alto:'badge-red',muy_alto:'badge-red'};
+const fiscalidadLabel={no_indicada:'Fiscalidad no indicada',fondo_traspasable:'Fondo traspasable',etf_no_traspasable:'ETF no traspasable fiscalmente',accion:'Acción',cuenta:'Cuenta / depósito',otro:'Otro'};
  
 function renderProductos(){
   if(!db.productos.length){document.getElementById('prod-list').innerHTML=`<div class="empty">No hay productos. Añade el primero con el botón de arriba.</div>`;return;}
@@ -1268,7 +1394,7 @@ function renderProductos(){
     const segRows=segs.slice(0,8).map(sg=>{
       // capital acumulado hasta ese mes: capitalInicial + aportaciones hasta ese mes inclusive
       const segsHasta=db.seguimiento.filter(s=>s.prodId===p.id&&(s.anio<sg.anio||(s.anio===sg.anio&&s.mes<=sg.mes)));
-      const apHasta=(parseFloat(p.capitalInicial)||0)+segsHasta.reduce((s2,s)=>s2+(parseFloat(s.aportacion)||0),0);
+      const apHasta=(parseFloat(p.capitalInicial)||0)+segsHasta.reduce((s2,s)=>s2+(parseFloat(s.aportacion)||0),0)+getTransferDelta(p.id, ym2str(sg.anio, sg.mes));
       const r=(parseFloat(sg.valorMercado)||0)-apHasta;
       const rp=apHasta>0?(r/apHasta*100):0;
       return {sg,apHasta,r,rp};
@@ -1276,7 +1402,7 @@ function renderProductos(){
  
     return `<div class="panel mb16">
       <div class="flex jcsb mb16">
-        <div><div style="font-size:16px;font-weight:600">${escHtml(p.nombre)}</div><div style="font-size:12px;color:var(--text3)">${tipoLabels[p.tipo]||p.tipo} · ${escHtml(p.entidad||'—')}${p.isin?' · '+escHtml(p.isin):''}</div></div>
+        <div><div style="font-size:16px;font-weight:600">${escHtml(p.nombre)}</div><div style="font-size:12px;color:var(--text3)">${tipoLabels[p.tipo]||p.tipo} · ${escHtml(p.entidad||'—')}${p.isin?' · '+escHtml(p.isin):''} · ${fiscalidadLabel[p.fiscalidad||'no_indicada']||'Fiscalidad no indicada'}</div></div>
         <div class="flex gap8"><span class="badge ${riesgoCls[p.riesgo]}">${riesgoLabel[p.riesgo]||p.riesgo}</span><button class="btn btn-primary btn-sm" onclick="openSegModal('${p.id}')">+ Registrar mes</button><button class="icon-btn" onclick="editProducto('${p.id}')">✏️</button><button class="icon-btn" onclick="delProducto('${p.id}')">🗑️</button></div>
       </div>
       <div class="cards mb16">
@@ -1285,7 +1411,7 @@ function renderProductos(){
         <div class="card ${rent>=0?'green':'red'}"><div class="label">Rentabilidad €</div><div class="value">${rent>=0?'+':''}${fmt(rent)}</div></div>
         <div class="card ${rentPct>=0?'green':'red'}"><div class="label">Rentabilidad %</div><div class="value">${rentPct>=0?'+':''}${fmtPct(rentPct)}</div></div>
       </div>
-      ${segRows.length?`<table><thead><tr><th>Mes/Año</th><th>Aportación</th><th>Capital acum.</th><th>Valor mercado</th><th>Rent. €</th><th>Rent. %</th><th></th></tr></thead><tbody>${segRows.map(({sg,apHasta,r,rp})=>`<tr><td>${MESES[sg.mes-1]} ${sg.anio}</td><td>${fmt(parseFloat(sg.aportacion)||0)}</td><td>${fmt(apHasta)}</td><td>${fmt(parseFloat(sg.valorMercado)||0)}</td><td class="${r>=0?'text-green':'text-red'}">${r>=0?'+':''}${fmt(r)}</td><td class="${rp>=0?'text-green':'text-red'}">${rp>=0?'+':''}${fmtPct(rp)}</td><td><button class="icon-btn" onclick="delSeg('${sg.id}')">🗑️</button></td></tr>`).join('')}</tbody></table>`:`<div class="empty" style="padding:16px">Sin registros mensuales aún.</div>`}
+      ${segRows.length?`<table><thead><tr><th>Mes/Año</th><th>Aportación / traspaso</th><th>Capital ajustado</th><th>Valor mercado</th><th>Rent. €</th><th>Rent. %</th><th></th></tr></thead><tbody>${segRows.map(({sg,apHasta,r,rp})=>`<tr><td>${MESES[sg.mes-1]} ${sg.anio}</td><td>${fmt(parseFloat(sg.aportacion)||0)}</td><td>${fmt(apHasta)}</td><td>${fmt(parseFloat(sg.valorMercado)||0)}</td><td class="${r>=0?'text-green':'text-red'}">${r>=0?'+':''}${fmt(r)}</td><td class="${rp>=0?'text-green':'text-red'}">${rp>=0?'+':''}${fmtPct(rp)}</td><td><button class="icon-btn" onclick="delSeg('${sg.id}')">🗑️</button></td></tr>`).join('')}</tbody></table>`:`<div class="empty" style="padding:16px">Sin registros mensuales aún.</div>`}
     </div>`;
   }).join('');
 }
@@ -1301,6 +1427,7 @@ function openProdModal(id){
     document.getElementById('prod-isin').value=p.isin||'';
     document.getElementById('prod-riesgo').value=p.riesgo||'bajo';
     document.getElementById('prod-capital').value=p.capitalInicial||0;
+    document.getElementById('prod-fiscalidad').value=p.fiscalidad||'no_indicada';
     document.getElementById('prod-comentario').value=p.comentario||'';
   }else{
     document.getElementById('prod-modal-title').textContent='Nuevo producto financiero';
@@ -1308,6 +1435,7 @@ function openProdModal(id){
     document.getElementById('prod-capital').value=0;
     document.getElementById('prod-tipo').value='fondo_indexado';
     document.getElementById('prod-riesgo').value='bajo';
+    document.getElementById('prod-fiscalidad').value='no_indicada';
   }
   openModal('prod-modal');
 }
@@ -1325,6 +1453,7 @@ function saveProducto(){
     isin:document.getElementById('prod-isin').value,
     riesgo:document.getElementById('prod-riesgo').value,
     capitalInicial:cap,
+    fiscalidad:document.getElementById('prod-fiscalidad').value,
     comentario:document.getElementById('prod-comentario').value
   };
   if(id){db.productos=db.productos.map(x=>x.id===id?p:x);}
@@ -1364,6 +1493,71 @@ function saveSeguimiento(){
   saveDB();closeModal('seg-modal');renderProductos();
 }
 function delSeg(id){if(!confirm('¿Eliminar este registro?'))return;db.seguimiento=db.seguimiento.filter(s=>s.id!==id);saveDB();renderProductos();}
+ 
+ 
+// ============================================================
+// TRASPASOS INTERNOS
+// ============================================================
+function renderTraspasos(){
+  db.traspasos=db.traspasos||[];
+  const total=db.traspasos.reduce((s,t)=>s+(parseFloat(t.importe)||0),0);
+  const thisYear=new Date().getFullYear();
+  const totalYear=db.traspasos.filter(t=>new Date(t.fecha).getFullYear()===thisYear).reduce((s,t)=>s+(parseFloat(t.importe)||0),0);
+  document.getElementById('traspasos-summary').innerHTML=`
+    <div class="card blue"><div class="label">Traspasos registrados</div><div class="value">${db.traspasos.length}</div></div>
+    <div class="card purple"><div class="label">Importe movido total</div><div class="value">${fmt(total)}</div></div>
+    <div class="card teal"><div class="label">Importe movido ${thisYear}</div><div class="value">${fmt(totalYear)}</div></div>
+    <div class="card green"><div class="label">Impacto en patrimonio</div><div class="value">0,00€</div><div class="sub">No es gasto ni pérdida</div></div>`;
+  const sorted=[...db.traspasos].sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
+  if(!sorted.length){
+    document.getElementById('traspasos-table-wrap').innerHTML=`<div class="empty">No hay traspasos internos registrados</div>`;
+    return;
+  }
+  document.getElementById('traspasos-table-wrap').innerHTML=`<table><thead><tr><th>Fecha</th><th>Origen</th><th>Destino</th><th>Importe</th><th>Comentario</th><th></th></tr></thead><tbody>${sorted.map(t=>{
+    const origen=db.productos.find(p=>p.id===t.origenProdId);
+    const destino=db.productos.find(p=>p.id===t.destinoProdId);
+    return `<tr><td>${t.fecha}</td><td>${escHtml(origen?origen.nombre:'Producto eliminado')}</td><td>${escHtml(destino?destino.nombre:'Producto eliminado')}</td><td class="text-blue">${fmt(parseFloat(t.importe)||0)}</td><td style="color:var(--text3)">${escHtml(t.comentario||'')}</td><td><button class="icon-btn" onclick="delTraspaso('${t.id}')">🗑️</button></td></tr>`;
+  }).join('')}</tbody></table>`;
+}
+function populateTraspasoProductos(){
+  const opts=db.productos.map(p=>`<option value="${p.id}">${escHtml(p.nombre)} · ${tipoLabels[p.tipo]||p.tipo} · ${fmt(getValorProducto(p))}</option>`).join('');
+  const o=document.getElementById('traspaso-origen');
+  const d=document.getElementById('traspaso-destino');
+  if(o) o.innerHTML=opts;
+  if(d) d.innerHTML=opts;
+}
+function openTraspasoModal(){
+  if(db.productos.length<2){showToast('Necesitas al menos dos productos financieros para registrar un traspaso.','warning');return;}
+  populateTraspasoProductos();
+  document.getElementById('traspaso-id').value='';
+  document.getElementById('traspaso-fecha').value=new Date().toISOString().split('T')[0];
+  document.getElementById('traspaso-importe').value='';
+  document.getElementById('traspaso-comentario').value='';
+  openModal('traspaso-modal');
+}
+function saveTraspaso(){
+  const fecha=document.getElementById('traspaso-fecha').value;
+  const origenProdId=document.getElementById('traspaso-origen').value;
+  const destinoProdId=document.getElementById('traspaso-destino').value;
+  const importe=parseFloat(document.getElementById('traspaso-importe').value);
+  if(!fecha){showToast('La fecha es obligatoria.','warning');return;}
+  if(origenProdId===destinoProdId){showToast('El producto origen y destino no pueden ser el mismo.','warning');return;}
+  if(isNaN(importe)||importe<=0){showToast('El importe debe ser mayor que cero.','warning');return;}
+  const origen=db.productos.find(p=>p.id===origenProdId);
+  const valorOrigen=origen?getValorProducto(origen):0;
+  if(importe>valorOrigen){showToast('El importe supera el valor disponible estimado del producto origen.','warning');return;}
+  db.traspasos=db.traspasos||[];
+  db.traspasos.push({id:uid(),fecha,origenProdId,destinoProdId,importe,comentario:document.getElementById('traspaso-comentario').value});
+  saveDB();
+  closeModal('traspaso-modal');
+  renderTraspasos();
+}
+function delTraspaso(id){
+  if(!confirm('¿Eliminar este traspaso interno? Se recalcularán los valores ajustados de los productos.')) return;
+  db.traspasos=(db.traspasos||[]).filter(t=>t.id!==id);
+  saveDB();
+  renderTraspasos();
+}
  
 // ============================================================
 // AGRUPACIONES
@@ -1521,9 +1715,13 @@ async function renderDatos(){
   fill.style.width=pct ? pct+'%' : '8%';
   fill.style.background=pct>80?'#e74c3c':pct>60?'#f39c12':'#2ecc71';
 }
-function exportJSON(){
+async function exportJSON(){
+  db.meta=db.meta||{};
+  db.meta.lastBackup=new Date().toISOString();
+  await saveDB();
   const str = JSON.stringify(db, null, 2);
   showExportModal('Copia de seguridad JSON', str, 'json');
+  renderDatos();
 }
 function exportCSV(){
   const rows=[['fecha','concepto','tipo','importe','categoria','subcategoria','metodo','comentario'],
@@ -1606,7 +1804,7 @@ function importJSON(input){
       const parsed=JSON.parse(e.target.result);
       // Validación básica de esquema
       if(typeof parsed!=='object'||Array.isArray(parsed)) throw new Error('Formato JSON no válido');
-      const validKeys=['movimientos','productos','seguimiento','gastosPrevistos','ingresosPrevistos','categorias','catColores','metodos','grupos','objetivos','config'];
+      const validKeys=['movimientos','productos','seguimiento','traspasos','gastosPrevistos','ingresosPrevistos','categorias','catColores','metodos','grupos','objetivos','checklist','meta','config'];
       const hasValidKey=validKeys.some(k=>parsed[k]!==undefined);
       if(!hasValidKey) throw new Error('El archivo no parece ser una copia de seguridad de MisFinanzas');
       if(!confirm('¿Restaurar datos? Se reemplazarán todos los datos actuales.')) return;
@@ -1651,6 +1849,46 @@ function importCSV(input){
   r.readAsText(f,'UTF-8');
 }
  
+ 
+// ============================================================
+// REVISION MENSUAL Y MANTENIMIENTO
+// ============================================================
+const CHECK_ITEMS=[
+  'Registrar ingresos reales del mes',
+  'Registrar gastos reales del mes',
+  'Actualizar valor de productos financieros',
+  'Revisar previsión del mes siguiente',
+  'Registrar traspasos internos sin tratarlos como gasto',
+  'Exportar copia de seguridad JSON'
+];
+function revisionKey(){const {y,m}=currentYM(); return ym2str(y,m);}
+function renderRevision(){
+  const key=revisionKey(); db.checklist=db.checklist||{}; const state=db.checklist[key]||{};
+  const {y,m}=currentYM(); const movs=movsOfMonth(y,m);
+  const gastos=movs.filter(x=>x.tipo==='gasto').length;
+  const ingresos=movs.filter(x=>x.tipo==='ingreso').length;
+  const segs=db.seguimiento.filter(s=>s.anio===y&&s.mes===m).length;
+  const previsiones=getPrevistosMes(y,m).length+getIngresosPrevistosMes(y,m).length;
+  document.getElementById('revision-cards').innerHTML=`<div class="card green"><div class="label">Ingresos registrados</div><div class="value">${ingresos}</div></div><div class="card red"><div class="label">Gastos registrados</div><div class="value">${gastos}</div></div><div class="card teal"><div class="label">Valores actualizados</div><div class="value">${segs}</div></div><div class="card blue"><div class="label">Previsiones activas</div><div class="value">${previsiones}</div></div>`;
+  document.getElementById('revision-checklist').innerHTML=CHECK_ITEMS.map((txt,i)=>`<label class="check-item"><input type="checkbox" id="chk-${i}" ${state[i]?'checked':''}> ${txt}</label>`).join('');
+}
+async function saveRevisionChecklist(){
+  const key=revisionKey(); db.checklist=db.checklist||{}; db.checklist[key]={};
+  CHECK_ITEMS.forEach((_,i)=>{db.checklist[key][i]=document.getElementById('chk-'+i)?.checked||false;});
+  await saveDB(); showToast('Revisión mensual guardada ✓','info'); renderRevision();
+}
+async function resetAppData(){
+  if(!confirm('¿Seguro que quieres borrar todos los datos locales de la app? Esta acción no se puede deshacer salvo que tengas una copia JSON.')) return;
+  db={movimientos:[],productos:[],seguimiento:[],traspasos:[],gastosPrevistos:[],ingresosPrevistos:[],categorias:['Vivienda','Alimentación','Transporte','Ocio','Salud','Mascota','Formación','Viajes','Suscripciones','Otros'],catColores:{Vivienda:'#e74c3c',Alimentación:'#f39c12',Transporte:'#3498db',Ocio:'#9b59b6',Salud:'#2ecc71',Mascota:'#1abc9c',Formación:'#e67e22',Viajes:'#16a085',Suscripciones:'#8e44ad',Otros:'#7f8c8d'},metodos:['Cuenta corriente','Tarjeta crédito','Efectivo','Bizum'],grupos:[],objetivos:{ahorro:0,inversion:0,patrimonio:0,emergencia:0},checklist:{},meta:{lastBackup:null,demoLoaded:false},config:{limites:{},alertas:{ahorro:true,gasto:true,inversion:true,colchon:3000}}};
+  await saveDB(); populateMonthSelects(); renderDashboard(); renderDatos(); showToast('Datos borrados. App lista para empezar desde cero.','info');
+}
+async function loadDemoManually(){
+  if(!confirm('Esto sustituirá los datos actuales por datos ficticios de prueba. No lo uses si ya estás trabajando con datos reales salvo que tengas copia JSON. ¿Continuar?')) return;
+  const before=db.productos.length+db.movimientos.length+db.seguimiento.length;
+  cargarDatosFicticios(true);
+  await saveDB(); populateMonthSelects(); renderDashboard(); renderDatos(); showToast(before?'Datos sustituidos por datos demo.':'Datos demo cargados.','info');
+}
+ 
 // ============================================================
 // INIT
 // ============================================================
@@ -1660,9 +1898,9 @@ window.addEventListener('click',e=>{
 // ============================================================
 // DATOS FICTICIOS DE DEMOSTRACIÓN
 // ============================================================
-function cargarDatosFicticios() {
-  // Solo se cargan la primera vez. Si ya hay datos, no se sobrescriben.
-  if (db.productos.length > 0 || db.movimientos.length > 0 || db.seguimiento.length > 0) return;
+function cargarDatosFicticios(force=false) {
+  // Solo se cargan la primera vez salvo que se fuerce desde el botón de datos demo.
+  if (!force && (db.productos.length > 0 || db.movimientos.length > 0 || db.seguimiento.length > 0 || (db.meta&&db.meta.demoLoaded))) return;
  
   const hoy = new Date();
   const anio = hoy.getFullYear();
@@ -1699,24 +1937,13 @@ function cargarDatosFicticios() {
     { id: uid(), prodId: 'demo_etf', mes: mesActual, anio: anio, aportacion: 50, valorMercado: 865, comentario: 'Dato ficticio' }
   ];
  
-  db.gastosPrevistos = [
-    { id: uid(), concepto:'Hipoteca demo', importe:650, categoria:'Vivienda', frecuencia:'mensual', dia:1, mes:mesActual, anio, metodo:'Cuenta corriente', activo:true, comentario:'Dato ficticio' },
-    { id: uid(), concepto:'Suscripción demo', importe:15, categoria:'Suscripciones', frecuencia:'mensual', dia:5, mes:mesActual, anio, metodo:'Tarjeta crédito', activo:true, comentario:'Dato ficticio' },
-    { id: uid(), concepto:'Seguro coche demo', importe:420, categoria:'Transporte', frecuencia:'anual', dia:10, mes:8, anio, metodo:'Cuenta corriente', activo:true, comentario:'Dato ficticio' }
-  ];
- 
-  db.ingresosPrevistos = [
-    { id: uid(), concepto:'Sueldo demo', importe:1850, frecuencia:'mensual', dia:1, mes:mesActual, anio, metodo:'Cuenta corriente', activo:true, comentario:'Dato ficticio' },
-    { id: uid(), concepto:'Paga extra verano demo', importe:1000, frecuencia:'anual', dia:25, mes:6, anio, metodo:'Cuenta corriente', activo:true, comentario:'Dato ficticio' },
-    { id: uid(), concepto:'Paga extra invierno demo', importe:1000, frecuencia:'anual', dia:20, mes:12, anio, metodo:'Cuenta corriente', activo:true, comentario:'Dato ficticio' }
-  ];
- 
   db.grupos = [
     { id: uid(), nombre: 'Gastos fijos demo', tipo: 'categoria', items: ['Vivienda','Suscripciones'] },
     { id: uid(), nombre: 'Inversión largo plazo demo', tipo: 'producto', items: ['demo_global','demo_etf'] }
   ];
  
   db.objetivos = { ahorro: 400, inversion: 200, patrimonio: 12000, emergencia: 5000 };
+  db.meta=db.meta||{}; db.meta.demoLoaded=true;
   saveDB();
 }
  
