@@ -4,7 +4,147 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MisFinanzas</title>
-<script src="local-chart.js"></script>
+<script>
+/* Gráficos locales sin conexión externa. Sustituye Chart.js para evitar llamadas a cdnjs.cloudflare.com. */
+class Chart {
+  constructor(canvas, config) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.config = config || {};
+    this.draw();
+  }
+  destroy() {
+    if (!this.canvas || !this.ctx) return;
+    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+  }
+  resize() {
+    const parent = this.canvas.parentElement;
+    const rect = parent ? parent.getBoundingClientRect() : this.canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const width = Math.max(280, rect.width || 320);
+    const height = Math.max(180, rect.height || 240);
+    this.canvas.width = Math.floor(width * dpr);
+    this.canvas.height = Math.floor(height * dpr);
+    this.canvas.style.width = width + 'px';
+    this.canvas.style.height = height + 'px';
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { width, height };
+  }
+  draw() {
+    if (!this.ctx) return;
+    const size = this.resize();
+    this.ctx.clearRect(0, 0, size.width, size.height);
+    const type = this.config.type || 'bar';
+    if (type === 'doughnut') return this.drawDoughnut(size);
+    if (type === 'line') return this.drawLine(size);
+    return this.drawBar(size);
+  }
+  datasets() { return (this.config.data && this.config.data.datasets) || []; }
+  labels() { return (this.config.data && this.config.data.labels) || []; }
+  colors(n, dsIndex = 0) {
+    const palette = ['#4a9eff','#2ecc71','#e74c3c','#f39c12','#9b59b6','#1abc9c','#e67e22','#16a085'];
+    const ds = this.datasets()[dsIndex] || {};
+    const bg = ds.backgroundColor || ds.borderColor || palette;
+    if (Array.isArray(bg)) return bg[n % bg.length] || palette[n % palette.length];
+    return bg || palette[n % palette.length];
+  }
+  text(color = '#a0a0c0', size = 11) {
+    this.ctx.fillStyle = color;
+    this.ctx.font = `${size}px Segoe UI, system-ui, sans-serif`;
+  }
+  maxVal() {
+    const vals = [];
+    this.datasets().forEach(ds => (ds.data || []).forEach(v => vals.push(Number(v) || 0)));
+    return Math.max(1, ...vals);
+  }
+  drawGrid(left, top, width, height, max) {
+    const ctx = this.ctx;
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = 1;
+    this.text('#6060a0', 10);
+    for (let i = 0; i <= 4; i++) {
+      const y = top + height - (height * i / 4);
+      ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(left + width, y); ctx.stroke();
+      const val = Math.round(max * i / 4);
+      ctx.fillText(val + '€', 8, y + 3);
+    }
+  }
+  drawBar({width, height}) {
+    const ctx = this.ctx, labels = this.labels(), datasets = this.datasets();
+    const left = 54, right = 14, top = 18, bottom = 36;
+    const w = width - left - right, h = height - top - bottom;
+    const max = this.maxVal() * 1.15;
+    this.drawGrid(left, top, w, h, max);
+    const groupCount = Math.max(1, labels.length);
+    const groupW = w / groupCount;
+    const dsCount = Math.max(1, datasets.length);
+    datasets.forEach((ds, di) => {
+      (ds.data || []).forEach((raw, i) => {
+        const v = Math.max(0, Number(raw) || 0);
+        const barW = Math.max(8, groupW * 0.65 / dsCount);
+        const x = left + i * groupW + groupW * 0.18 + di * barW;
+        const bh = h * (v / max);
+        const y = top + h - bh;
+        ctx.fillStyle = this.colors(i, di);
+        this.roundRect(x, y, barW * 0.88, bh, 5);
+        ctx.fill();
+      });
+    });
+    this.text('#a0a0c0', 10);
+    labels.forEach((lab, i) => {
+      const x = left + i * groupW + groupW / 2;
+      ctx.save(); ctx.textAlign = 'center';
+      ctx.fillText(String(lab).slice(0, 12), x, height - 12);
+      ctx.restore();
+    });
+  }
+  drawLine({width, height}) {
+    const ctx = this.ctx, labels = this.labels(), ds = this.datasets()[0] || {data:[]};
+    const data = (ds.data || []).map(v => Number(v) || 0);
+    const left = 54, right = 16, top = 18, bottom = 36;
+    const w = width - left - right, h = height - top - bottom;
+    const max = Math.max(1, ...data) * 1.15;
+    this.drawGrid(left, top, w, h, max);
+    const step = data.length > 1 ? w / (data.length - 1) : w;
+    const pts = data.map((v, i) => [left + i * step, top + h - h * (v / max)]);
+    if (!pts.length) return;
+    ctx.strokeStyle = ds.borderColor || '#4a9eff'; ctx.lineWidth = 2;
+    ctx.beginPath(); pts.forEach(([x,y], i) => i ? ctx.lineTo(x,y) : ctx.moveTo(x,y)); ctx.stroke();
+    const grad = ctx.createLinearGradient(0, top, 0, top+h);
+    grad.addColorStop(0, 'rgba(74,158,255,0.24)'); grad.addColorStop(1, 'rgba(74,158,255,0.02)');
+    ctx.lineTo(left + w, top+h); ctx.lineTo(left, top+h); ctx.closePath(); ctx.fillStyle = grad; ctx.fill();
+    pts.forEach(([x,y]) => { ctx.beginPath(); ctx.fillStyle = ds.borderColor || '#4a9eff'; ctx.arc(x, y, 3, 0, Math.PI*2); ctx.fill(); });
+    this.text('#a0a0c0', 10); ctx.textAlign = 'center';
+    labels.forEach((lab, i) => ctx.fillText(String(lab).slice(0, 8), left + i * step, height - 12));
+    ctx.textAlign = 'left';
+  }
+  drawDoughnut({width, height}) {
+    const ctx = this.ctx, labels = this.labels(), ds = this.datasets()[0] || {data:[]};
+    const data = (ds.data || []).map(v => Math.max(0, Number(v) || 0));
+    const total = data.reduce((a,b)=>a+b,0) || 1;
+    const cx = width * 0.35, cy = height * 0.50, r = Math.min(width * 0.24, height * 0.34), inner = r * 0.58;
+    let angle = -Math.PI / 2;
+    data.forEach((v, i) => {
+      const a2 = angle + (v / total) * Math.PI * 2;
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, r, angle, a2); ctx.closePath(); ctx.fillStyle = this.colors(i, 0); ctx.fill();
+      angle = a2;
+    });
+    ctx.beginPath(); ctx.fillStyle = '#16162a'; ctx.arc(cx, cy, inner, 0, Math.PI*2); ctx.fill();
+    this.text('#a0a0c0', 11);
+    const lx = width * 0.62; let ly = Math.max(26, cy - Math.min(70, labels.length*11));
+    labels.forEach((lab, i) => {
+      ctx.fillStyle = this.colors(i,0); ctx.fillRect(lx, ly-9, 10, 10);
+      ctx.fillStyle = '#a0a0c0'; ctx.fillText(String(lab).slice(0, 28), lx + 16, ly);
+      ly += 20;
+    });
+  }
+  roundRect(x, y, w, h, r) {
+    const ctx = this.ctx; r = Math.min(r, w/2, h/2);
+    ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+  }
+}
+window.addEventListener('resize', () => { if (window.charts) Object.values(window.charts).forEach(c => c && c.draw && c.draw()); });
+</script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -98,6 +238,7 @@ label{display:block;font-size:11px;color:var(--text3);margin-bottom:5px;text-tra
   <p class="sub">Finanzas personales</p>
   <div class="nav-item active" onclick="nav('dashboard')"><span class="icon">📊</span>Dashboard</div>
   <div class="nav-item" onclick="nav('movimientos')"><span class="icon">📝</span>Movimientos</div>
+  <div class="nav-item" onclick="nav('gastosprevistos')"><span class="icon">🧾</span>Gastos previstos</div>
   <div class="nav-item" onclick="nav('categorias')"><span class="icon">🗂️</span>Categorías</div>
   <div class="nav-item" onclick="nav('ahorro')"><span class="icon">🏦</span>Ahorro</div>
   <div class="nav-item" onclick="nav('inversiones')"><span class="icon">📈</span>Inversiones</div>
@@ -140,6 +281,24 @@ label{display:block;font-size:11px;color:var(--text3);margin-bottom:5px;text-tra
   </div>
   <div id="mov-summary" class="cards mb24"></div>
   <div class="panel"><div id="mov-table-wrap"></div></div>
+
+</section>
+
+<!-- GASTOS PREVISTOS -->
+<section class="section" id="s-gastosprevistos">
+  <div class="flex gap12 jcsb mb24">
+    <h2 style="margin:0">Gastos previstos</h2>
+    <div class="flex gap8">
+      <select id="prev-filter-month" style="width:auto;padding:6px 10px" onchange="renderGastosPrevistos()"></select>
+      <button class="btn btn-primary btn-sm" onclick="openPrevistoModal()">+ Nuevo previsto</button>
+    </div>
+  </div>
+  <div class="alert alert-info mb16">ℹ️ Aquí puedes registrar gastos que sabes que llegarán: hipoteca mensual, seguros anuales, IBI, suscripciones o pagos puntuales. Sirve para anticipar meses caros antes de que lleguen.</div>
+  <div id="prev-summary" class="cards mb24"></div>
+  <div class="row2">
+    <div class="panel"><h3>Gastos previstos del mes</h3><div id="prev-table-wrap"></div></div>
+    <div class="panel"><h3>Comparativa previsto vs real</h3><div class="chart-wrap"><canvas id="ch-prev" role="img" aria-label="Comparativa de gastos previstos y reales"></canvas></div></div>
+  </div>
 </section>
 
 <!-- CATEGORIAS -->
@@ -264,10 +423,10 @@ label{display:block;font-size:11px;color:var(--text3);margin-bottom:5px;text-tra
 <section class="section" id="s-datos">
   <h2>Importar / Exportar datos</h2>
   <div id="storage-info" class="panel mb24">
-    <h3 class="mb16">Almacenamiento local IndexedDB</h3>
+    <h3 class="mb16">Uso de almacenamiento local seguro</h3>
     <div class="flex jcsb" style="font-size:13px;margin-bottom:6px"><span id="storage-used"></span><span id="storage-pct"></span></div>
     <div class="storage-bar"><div class="fill" id="storage-fill"></div></div>
-    <p style="font-size:12px;color:var(--text3);margin-top:8px">Los datos se guardan en IndexedDB del navegador. No hay límite fijo de 5 MB como en localStorage, pero conviene exportar copias JSON periódicas.</p>
+    <p style="font-size:12px;color:var(--text3);margin-top:8px">ℹ️ Los datos se guardan en IndexedDB, una base de datos local del navegador más robusta que localStorage. Mantén copias de seguridad periódicas en JSON.</p>
   </div>
   <div class="row2">
     <div class="panel"><h3 class="mb16">💾 Exportar</h3>
@@ -294,11 +453,26 @@ label{display:block;font-size:11px;color:var(--text3);margin-bottom:5px;text-tra
   <h3 id="mov-modal-title">Nuevo movimiento</h3>
   <input type="hidden" id="mov-id">
   <div class="form-row cols2"><div><label>Fecha</label><input type="date" id="mov-fecha"></div><div><label>Tipo</label><select id="mov-tipo"><option value="ingreso">💚 Ingreso</option><option value="gasto">🔴 Gasto</option><option value="ahorro">🔵 Ahorro</option><option value="aportacion">💎 Aportación a producto</option></select></div></div>
+  <div class="form-row cols3" id="mov-previsto-row"><div><label><input type="checkbox" id="mov-crear-previsto" style="width:auto;margin-right:6px"> Guardar como previsto</label></div><div><label>Frecuencia</label><select id="mov-prev-frecuencia"><option value="mensual">Mensual</option><option value="trimestral">Trimestral</option><option value="semestral">Semestral</option><option value="anual">Anual</option><option value="puntual">Una vez</option></select></div><div><label>Mes de referencia</label><select id="mov-prev-mes"></select></div></div>
   <div class="form-row"><label>Concepto</label><input type="text" id="mov-concepto" placeholder="Ej: Nómina, Supermercado..."></div>
   <div class="form-row cols2"><div><label>Importe (€)</label><input type="number" id="mov-importe" step="0.01" placeholder="0.00" min="0"></div><div><label>Categoría</label><select id="mov-categoria"></select></div></div>
   <div class="form-row cols2"><div><label>Subcategoría</label><input type="text" id="mov-subcat" placeholder="Opcional"></div><div><label>Método / cuenta</label><select id="mov-metodo"></select></div></div>
   <div class="form-row"><label>Comentario</label><textarea id="mov-comentario" placeholder="Opcional..."></textarea></div>
   <div class="flex gap8 mt16"><button class="btn btn-primary" onclick="saveMovimiento()">Guardar</button><button class="btn btn-ghost" onclick="closeModal('mov-modal')">Cancelar</button></div>
+</div></div>
+
+<!-- MODAL GASTO PREVISTO -->
+<div class="modal-bg" id="prev-modal">
+<div class="modal">
+  <h3 id="prev-modal-title">Nuevo gasto previsto</h3>
+  <input type="hidden" id="prev-id">
+  <div class="form-row"><label>Concepto</label><input type="text" id="prev-concepto" placeholder="Ej: Hipoteca, seguro coche, IBI..."></div>
+  <div class="form-row cols2"><div><label>Importe previsto (€)</label><input type="number" id="prev-importe" step="0.01" placeholder="0.00" min="0"></div><div><label>Categoría</label><select id="prev-categoria"></select></div></div>
+  <div class="form-row cols3"><div><label>Frecuencia</label><select id="prev-frecuencia"><option value="mensual">Mensual</option><option value="trimestral">Trimestral</option><option value="semestral">Semestral</option><option value="anual">Anual</option><option value="puntual">Una vez</option></select></div><div><label>Día aproximado</label><input type="number" id="prev-dia" min="1" max="31" value="1"></div><div><label>Mes de referencia</label><select id="prev-mes"></select></div></div>
+  <div class="form-row cols2"><div><label>Año, si es puntual</label><input type="number" id="prev-anio" min="2020" max="2035"></div><div><label>Método / cuenta</label><select id="prev-metodo"></select></div></div>
+  <div class="form-row"><label><input type="checkbox" id="prev-activo" style="width:auto;margin-right:6px" checked> Activo</label></div>
+  <div class="form-row"><label>Comentario</label><textarea id="prev-comentario" placeholder="Opcional..."></textarea></div>
+  <div class="flex gap8 mt16"><button class="btn btn-primary" onclick="savePrevisto()">Guardar</button><button class="btn btn-ghost" onclick="closeModal('prev-modal')">Cancelar</button></div>
 </div></div>
 
 <!-- MODAL CATEGORIA -->
@@ -323,8 +497,8 @@ label{display:block;font-size:11px;color:var(--text3);margin-bottom:5px;text-tra
 <div class="modal">
   <h3 id="prod-modal-title">Nuevo producto financiero</h3>
   <input type="hidden" id="prod-id">
-  <div class="form-row cols2"><div><label>Nombre</label><input type="text" id="prod-nombre" placeholder="Ej: Fondo global diversificado"></div><div><label>Tipo</label><select id="prod-tipo"><option value="colchon">🛡️ Colchón de seguridad</option><option value="ahorro_conservador">💙 Ahorro conservador</option><option value="fondo_indexado">📈 Fondo indexado</option><option value="etf">📊 ETF</option><option value="fondo_activo">🎯 Fondo activo</option><option value="fondo_monetario">💰 Fondo monetario</option><option value="acciones">📉 Acciones</option><option value="otro">📦 Otro</option></select></div></div>
-  <div class="form-row cols2"><div><label>Entidad</label><input type="text" id="prod-entidad" placeholder="Ej: Entidad demo"></div><div><label>ISIN (opcional)</label><input type="text" id="prod-isin" placeholder="Ej: DEMO0000000"></div></div>
+  <div class="form-row cols2"><div><label>Nombre</label><input type="text" id="prod-nombre" placeholder="Ej: Fidelity MSCI World"></div><div><label>Tipo</label><select id="prod-tipo"><option value="colchon">🛡️ Colchón de seguridad</option><option value="ahorro_conservador">💙 Ahorro conservador</option><option value="fondo_indexado">📈 Fondo indexado</option><option value="etf">📊 ETF</option><option value="fondo_activo">🎯 Fondo activo</option><option value="fondo_monetario">💰 Fondo monetario</option><option value="acciones">📉 Acciones</option><option value="otro">📦 Otro</option></select></div></div>
+  <div class="form-row cols2"><div><label>Entidad</label><input type="text" id="prod-entidad" placeholder="Ej: Entidad demo"></div><div><label>ISIN (opcional)</label><input type="text" id="prod-isin" placeholder="Ej: Identificador demo"></div></div>
   <div class="form-row cols2"><div><label>Nivel de riesgo</label><select id="prod-riesgo"><option value="muy_bajo">Muy bajo</option><option value="bajo">Bajo</option><option value="medio">Medio</option><option value="alto">Alto</option><option value="muy_alto">Muy alto</option></select></div><div><label>Capital inicial aportado (€)</label><input type="number" id="prod-capital" step="0.01" placeholder="0.00" min="0"></div></div>
   <div class="form-row"><label>Comentario</label><textarea id="prod-comentario"></textarea></div>
   <div class="flex gap8 mt16"><button class="btn btn-primary" onclick="saveProducto()">Guardar</button><button class="btn btn-ghost" onclick="closeModal('prod-modal')">Cancelar</button></div>
@@ -353,167 +527,96 @@ label{display:block;font-size:11px;color:var(--text3);margin-bottom:5px;text-tra
 
 <script>
 // ============================================================
-// ESTADO Y PERSISTENCIA CON INDEXEDDB
+// ESTADO Y PERSISTENCIA
 // ============================================================
-const IDB_NAME = 'misfinanzas-indexeddb-v1';
+// Los datos se guardan en IndexedDB.
+// Es más robusto que localStorage y evita el límite práctico de ~5 MB.
+const IDB_NAME = 'misfinanzas-economia-db';
+const IDB_VERSION = 1;
 const IDB_STORE = 'app-state';
-const IDB_STATE_KEY = 'main';
-const DB_KEY = 'mf_v3_indexeddb';
-const OLD_LOCALSTORAGE_PREFIX = 'mf_v2_';
+const IDB_RECORD_ID = 'main';
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
+// Tipos que SÍ son inversión (excluye colchon y ahorro_conservador)
 const TIPOS_INVERSION = new Set(['fondo_indexado','etf','fondo_activo','fondo_monetario','acciones','otro']);
 const TIPOS_AHORRO = new Set(['colchon','ahorro_conservador']);
 
-let db = createDefaultDB();
-
-function createDefaultDB() {
-  return {
-    movimientos:[],productos:[],seguimiento:[],
-    categorias:['Vivienda','Alimentación','Transporte','Ocio','Salud','Mascota','Formación','Viajes','Suscripciones','Otros'],
-    catColores:{Vivienda:'#e74c3c',Alimentación:'#f39c12',Transporte:'#3498db',Ocio:'#9b59b6',Salud:'#2ecc71',Mascota:'#1abc9c',Formación:'#e67e22',Viajes:'#16a085',Suscripciones:'#8e44ad',Otros:'#7f8c8d'},
-    metodos:['Cuenta corriente','Tarjeta crédito','Efectivo','Bizum'],
-    grupos:[],
-    objetivos:{ahorro:0,inversion:0,patrimonio:0,emergencia:0},
-    config:{limites:{},alertas:{ahorro:true,gasto:true,inversion:true,colchon:3000}},
-    meta:{demoLoaded:false,storage:'IndexedDB'}
-  };
-}
-
-function mergeKnownFields(target, parsed) {
-  const validKeys = ['movimientos','productos','seguimiento','categorias','catColores','metodos','grupos','objetivos','config','meta'];
-  validKeys.forEach(k => { if (parsed && parsed[k] !== undefined) target[k] = parsed[k]; });
-  target.meta = target.meta || {};
-  target.meta.storage = 'IndexedDB';
-  return target;
-}
+let db = {
+  movimientos:[],productos:[],seguimiento:[],gastosPrevistos:[],
+  categorias:['Vivienda','Alimentación','Transporte','Ocio','Salud','Mascota','Formación','Viajes','Suscripciones','Otros'],
+  catColores:{Vivienda:'#e74c3c',Alimentación:'#f39c12',Transporte:'#3498db',Ocio:'#9b59b6',Salud:'#2ecc71',Mascota:'#1abc9c',Formación:'#e67e22',Viajes:'#16a085',Suscripciones:'#8e44ad',Otros:'#7f8c8d'},
+  metodos:['Cuenta corriente','Tarjeta crédito','Efectivo','Bizum'],
+  grupos:[],
+  objetivos:{ahorro:0,inversion:0,patrimonio:0,emergencia:0},
+  config:{limites:{},alertas:{ahorro:true,gasto:true,inversion:true,colchon:3000}}
+};
 
 function openIDB() {
   return new Promise((resolve, reject) => {
     if (!('indexedDB' in window)) {
-      reject(new Error('Este navegador no soporta IndexedDB'));
+      reject(new Error('IndexedDB no está disponible en este navegador.'));
       return;
     }
-    const req = indexedDB.open(IDB_NAME, 1);
+    const req = indexedDB.open(IDB_NAME, IDB_VERSION);
     req.onupgradeneeded = () => {
       const database = req.result;
-      if (!database.objectStoreNames.contains(IDB_STORE)) {
-        database.createObjectStore(IDB_STORE, { keyPath: 'id' });
-      }
+      if (!database.objectStoreNames.contains(IDB_STORE)) database.createObjectStore(IDB_STORE);
     };
     req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error || new Error('No se pudo abrir IndexedDB'));
+    req.onerror = () => reject(req.error || new Error('No se pudo abrir IndexedDB.'));
   });
 }
 
-async function idbGetState() {
-  const database = await openIDB();
-  return new Promise((resolve, reject) => {
+function idbGet(key) {
+  return openIDB().then(database => new Promise((resolve, reject) => {
     const tx = database.transaction(IDB_STORE, 'readonly');
     const store = tx.objectStore(IDB_STORE);
-    const req = store.get(IDB_STATE_KEY);
-    req.onsuccess = () => resolve(req.result ? req.result.value : null);
+    const req = store.get(key);
+    req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
     tx.oncomplete = () => database.close();
-  });
+    tx.onerror = () => { database.close(); reject(tx.error); };
+  }));
 }
 
-async function idbSetState(value) {
-  const database = await openIDB();
-  return new Promise((resolve, reject) => {
+function idbSet(key, value) {
+  return openIDB().then(database => new Promise((resolve, reject) => {
     const tx = database.transaction(IDB_STORE, 'readwrite');
     const store = tx.objectStore(IDB_STORE);
-    store.put({ id: IDB_STATE_KEY, value, updatedAt: new Date().toISOString() });
-    tx.oncomplete = () => { database.close(); resolve(); };
+    const req = store.put(value, key);
+    req.onsuccess = () => resolve(true);
+    req.onerror = () => reject(req.error);
+    tx.oncomplete = () => database.close();
     tx.onerror = () => { database.close(); reject(tx.error); };
-  });
+  }));
 }
 
 async function loadDB() {
   try {
-    const saved = await idbGetState();
-    if (saved) {
-      db = mergeKnownFields(createDefaultDB(), saved);
-      return;
-    }
+    const parsed = await idbGet(IDB_RECORD_ID);
+    if (!parsed) return;
+    // Validación de esquema: solo copiamos campos conocidos
+    const validKeys = ['movimientos','productos','seguimiento','gastosPrevistos','categorias','catColores','metodos','grupos','objetivos','config'];
+    validKeys.forEach(k => { if (parsed[k] !== undefined) db[k] = parsed[k]; });
+  } catch(e) {
+    console.warn('Error al cargar datos desde IndexedDB:', e);
+    showToast('⚠️ No se pudieron cargar los datos locales. Revisa permisos del navegador.', 'warning');
+  }
+}
 
-    // Migración prudente: si había una versión antigua en localStorage, la migra una sola vez a IndexedDB.
-    let migrated = null;
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && key.startsWith(OLD_LOCALSTORAGE_PREFIX)) {
-        try { migrated = JSON.parse(localStorage.getItem(key)); break; } catch(e) {}
+async function saveDB() {
+  try {
+    await idbSet(IDB_RECORD_ID, db);
+    if (navigator.storage && navigator.storage.estimate) {
+      const estimate = await navigator.storage.estimate();
+      if (estimate.quota && estimate.usage && estimate.usage / estimate.quota > 0.85) {
+        showToast('⚠️ El almacenamiento del navegador está alto. Exporta una copia JSON.', 'warning');
       }
     }
-    if (migrated) {
-      db = mergeKnownFields(createDefaultDB(), migrated);
-      await saveDB(false);
-      showToast('Datos antiguos migrados a IndexedDB ✓', 'info');
-      return;
-    }
-
-    db = createDefaultDB();
-    loadDemoData();
-    await saveDB(false);
   } catch(e) {
-    console.warn('Error al cargar datos:', e);
-    showToast('No se pudo abrir IndexedDB. Exporta copias con frecuencia.', 'danger');
+    console.warn('Error al guardar datos en IndexedDB:', e);
+    showToast('❌ No se han podido guardar los datos. Exporta una copia si puedes.', 'danger');
   }
-}
-
-async function saveDB(showErrors = true) {
-  try {
-    db.meta = db.meta || {};
-    db.meta.storage = 'IndexedDB';
-    db.meta.updatedAt = new Date().toISOString();
-    await idbSetState(db);
-  } catch(e) {
-    if (showErrors) showToast('❌ No se han podido guardar los datos en IndexedDB.', 'danger');
-    console.warn('Error al guardar datos:', e);
-  }
-}
-
-async function estimateStorage() {
-  if (navigator.storage && navigator.storage.estimate) {
-    const est = await navigator.storage.estimate();
-    return { usage: est.usage || 0, quota: est.quota || 0 };
-  }
-  return { usage: 0, quota: 0 };
-}
-
-function loadDemoData() {
-  if (db.meta && db.meta.demoLoaded) return;
-  const anio = new Date().getFullYear();
-  db.productos = [
-    { id: 'demo_colchon', nombre: 'Cuenta colchón demo', tipo: 'colchon', entidad: 'Entidad ficticia A', isin: '', riesgo: 'muy_bajo', capitalInicial: 6000, comentario: 'Dato ficticio de demostración.' },
-    { id: 'demo_monetario', nombre: 'Fondo monetario demo', tipo: 'ahorro_conservador', entidad: 'Entidad ficticia B', isin: 'DEMO0000001', riesgo: 'bajo', capitalInicial: 2500, comentario: 'Dato ficticio de demostración.' },
-    { id: 'demo_global', nombre: 'Fondo global indexado demo', tipo: 'fondo_indexado', entidad: 'Entidad ficticia C', isin: 'DEMO0000002', riesgo: 'medio', capitalInicial: 1200, comentario: 'Dato ficticio de demostración.' },
-    { id: 'demo_etf', nombre: 'ETF dividendos demo', tipo: 'etf', entidad: 'Entidad ficticia D', isin: 'DEMO0000003', riesgo: 'medio', capitalInicial: 800, comentario: 'Dato ficticio de demostración.' }
-  ];
-  db.seguimiento = [
-    { id: uid(), prodId: 'demo_colchon', mes: 5, anio, aportacion: 0, valorMercado: 6000, comentario: 'Dato ficticio.' },
-    { id: uid(), prodId: 'demo_colchon', mes: 6, anio, aportacion: 200, valorMercado: 6200, comentario: 'Dato ficticio.' },
-    { id: uid(), prodId: 'demo_monetario', mes: 5, anio, aportacion: 0, valorMercado: 2500, comentario: 'Dato ficticio.' },
-    { id: uid(), prodId: 'demo_monetario', mes: 6, anio, aportacion: 150, valorMercado: 2655, comentario: 'Dato ficticio.' },
-    { id: uid(), prodId: 'demo_global', mes: 5, anio, aportacion: 0, valorMercado: 1210, comentario: 'Dato ficticio.' },
-    { id: uid(), prodId: 'demo_global', mes: 6, anio, aportacion: 100, valorMercado: 1335, comentario: 'Dato ficticio.' },
-    { id: uid(), prodId: 'demo_etf', mes: 5, anio, aportacion: 0, valorMercado: 790, comentario: 'Dato ficticio.' },
-    { id: uid(), prodId: 'demo_etf', mes: 6, anio, aportacion: 50, valorMercado: 855, comentario: 'Dato ficticio.' }
-  ];
-  const baseMonth = String(new Date().getMonth() + 1).padStart(2,'0');
-  db.movimientos = [
-    { id: uid(), fecha: `${anio}-${baseMonth}-01`, tipo: 'ingreso', concepto: 'Ingreso mensual demo', importe: 2200, categoria: 'Otros', subcat: '', metodo: 'Cuenta corriente', comentario: 'Dato ficticio.' },
-    { id: uid(), fecha: `${anio}-${baseMonth}-03`, tipo: 'gasto', concepto: 'Alquiler demo', importe: 650, categoria: 'Vivienda', subcat: '', metodo: 'Cuenta corriente', comentario: 'Dato ficticio.' },
-    { id: uid(), fecha: `${anio}-${baseMonth}-06`, tipo: 'gasto', concepto: 'Compra alimentación demo', importe: 280, categoria: 'Alimentación', subcat: '', metodo: 'Tarjeta crédito', comentario: 'Dato ficticio.' },
-    { id: uid(), fecha: `${anio}-${baseMonth}-10`, tipo: 'aportacion', concepto: 'Aportación inversión demo', importe: 150, categoria: 'Otros', subcat: '', metodo: 'Cuenta corriente', comentario: 'Dato ficticio. No computa como gasto.' }
-  ];
-  db.grupos = [
-    { id: uid(), nombre: 'Gastos básicos demo', tipo: 'categoria', items: ['Vivienda','Alimentación'] },
-    { id: uid(), nombre: 'Inversión demo', tipo: 'producto', items: ['demo_global','demo_etf'] }
-  ];
-  db.objetivos = { ahorro: 500, inversion: 150, patrimonio: 20000, emergencia: 6000 };
-  db.config = { limites: { Vivienda: 800, Alimentación: 350 }, alertas: { ahorro: true, gasto: true, inversion: true, colchon: 5000 } };
-  db.meta = { demoLoaded: true, storage: 'IndexedDB' };
 }
 
 function showToast(msg, type='info') {
@@ -551,41 +654,77 @@ function destroyChart(id){if(charts[id]){charts[id].destroy();delete charts[id];
 function buildChart(id,cfg){destroyChart(id);const el=document.getElementById(id);if(!el)return;charts[id]=new Chart(el,cfg);}
 
 // ============================================================
-// CÁLCULOS PATRIMONIALES
+// CÁLCULOS PATRIMONIALES CORREGIDOS
 // ============================================================
-function getSegsAportacion(prodId) { return db.seguimiento.filter(s=>s.prodId===prodId).reduce((s,sg)=>s+(parseFloat(sg.aportacion)||0),0); }
-function getCapitalTotalProducto(p) { return (parseFloat(p.capitalInicial)||0) + getSegsAportacion(p.id); }
+
+// Suma aportaciones reales de seguimiento (sin capitalInicial para evitar doble conteo)
+function getSegsAportacion(prodId) {
+  return db.seguimiento.filter(s=>s.prodId===prodId).reduce((s,sg)=>s+(parseFloat(sg.aportacion)||0),0);
+}
+
+// Capital total aportado a un producto = capitalInicial + todas las aportaciones de seguimiento
+function getCapitalTotalProducto(p) {
+  return (parseFloat(p.capitalInicial)||0) + getSegsAportacion(p.id);
+}
+
+// Último seguimiento registrado para un producto
 function getLastSeg(prodId) {
   const segs=db.seguimiento.filter(s=>s.prodId===prodId);
   if(!segs.length) return null;
   return segs.sort((a,b)=>b.anio-a.anio||b.mes-a.mes)[0];
 }
+
+// Valor actual de un producto (último seguimiento o capitalInicial si no hay)
 function getValorProducto(p) {
   const last=getLastSeg(p.id);
   return last ? (parseFloat(last.valorMercado)||0) : (parseFloat(p.capitalInicial)||0);
 }
+
+// --- SEPARACIÓN AHORRO vs INVERSIÓN ---
+
 function getProductosByTipo(tipo) { return db.productos.filter(p=>tipo.has(p.tipo)); }
-function getInversionTotalAportado() { return getProductosByTipo(TIPOS_INVERSION).reduce((s,p)=>s+getCapitalTotalProducto(p),0); }
-function getInversionValorActual() { return getProductosByTipo(TIPOS_INVERSION).reduce((s,p)=>s+getValorProducto(p),0); }
-function getAhorroTotalValor() { return getProductosByTipo(TIPOS_AHORRO).reduce((s,p)=>s+getValorProducto(p),0); }
-function getColchonValor() { return db.productos.filter(p=>p.tipo==='colchon').reduce((s,p)=>s+getValorProducto(p),0); }
+
+// Totales SOLO de productos de inversión
+function getInversionTotalAportado() {
+  return getProductosByTipo(TIPOS_INVERSION).reduce((s,p)=>s+getCapitalTotalProducto(p),0);
+}
+function getInversionValorActual() {
+  return getProductosByTipo(TIPOS_INVERSION).reduce((s,p)=>s+getValorProducto(p),0);
+}
+
+// Totales SOLO de ahorro (colchón + conservador)
+function getAhorroTotalValor() {
+  return getProductosByTipo(TIPOS_AHORRO).reduce((s,p)=>s+getValorProducto(p),0);
+}
+function getColchonValor() {
+  return db.productos.filter(p=>p.tipo==='colchon').reduce((s,p)=>s+getValorProducto(p),0);
+}
+
+// Patrimonio total CORREGIDO:
+// = valor de todos los productos (ahorro + inversión) + saldo en efectivo (ingresos acum. - gastos acum.)
+// Los movimientos tipo "ahorro" son flujos de clasificación, no saldo adicional.
+// El saldo real es siempre ingresos - gastos a lo largo del tiempo.
 function getPatrimonio() {
   const totalProductos = db.productos.reduce((s,p)=>s+getValorProducto(p),0);
+  // Efectivo estimado = ingresos acumulados - gastos acumulados - aportaciones acumuladas
   const totalIngresos = db.movimientos.filter(m=>m.tipo==='ingreso').reduce((s,m)=>s+(parseFloat(m.importe)||0),0);
   const totalGastos = db.movimientos.filter(m=>m.tipo==='gasto').reduce((s,m)=>s+(parseFloat(m.importe)||0),0);
   const totalAportaciones = db.movimientos.filter(m=>m.tipo==='aportacion').reduce((s,m)=>s+(parseFloat(m.importe)||0),0);
   const efectivo = Math.max(0, totalIngresos - totalGastos - totalAportaciones);
   return totalProductos + efectivo;
 }
+
 function calcPatrimonioMes(y,m) {
   const key=ym2str(y,m);
+  // Valor productos hasta ese mes
   const totalProductos = db.productos.reduce((sum,p)=>{
     const pSegs=db.seguimiento.filter(s=>s.prodId===p.id&&ym2str(s.anio,s.mes)<=key);
     if(!pSegs.length) return sum+(parseFloat(p.capitalInicial)||0);
     const last=pSegs.sort((a,b)=>b.anio-a.anio||b.mes-a.mes)[0];
     return sum+(parseFloat(last.valorMercado)||0);
   },0);
-  const movsBefore=db.movimientos.filter(mv=>mv.fecha<=key+'-31');
+  // Efectivo hasta ese mes
+  const movsBefore=db.movimientos.filter(mv=>mv.fecha<=key+'--');
   const ing=movsBefore.filter(m=>m.tipo==='ingreso').reduce((s,m)=>s+(parseFloat(m.importe)||0),0);
   const gas=movsBefore.filter(m=>m.tipo==='gasto').reduce((s,m)=>s+(parseFloat(m.importe)||0),0);
   const ap=movsBefore.filter(m=>m.tipo==='aportacion').reduce((s,m)=>s+(parseFloat(m.importe)||0),0);
@@ -600,7 +739,7 @@ function nav(id) {
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   document.getElementById('s-'+id).classList.add('active');
   document.querySelectorAll('.nav-item').forEach(n=>{if(n.getAttribute('onclick')===`nav('${id}')`)n.classList.add('active');});
-  const m={dashboard:renderDashboard,movimientos:renderMovimientos,categorias:renderCategorias,ahorro:renderAhorro,inversiones:renderInversiones,productos:renderProductos,agrupaciones:renderAgrupaciones,objetivos:renderObjetivos,informes:renderInformes,config:renderConfig,datos:renderDatos};
+  const m={dashboard:renderDashboard,movimientos:renderMovimientos,gastosprevistos:renderGastosPrevistos,categorias:renderCategorias,ahorro:renderAhorro,inversiones:renderInversiones,productos:renderProductos,agrupaciones:renderAgrupaciones,objetivos:renderObjetivos,informes:renderInformes,config:renderConfig,datos:renderDatos};
   if(m[id]) m[id]();
 }
 
@@ -611,16 +750,23 @@ function populateMonthSelects() {
   const months=getMonths(24);
   const cur=currentYM();
   const curKey=ym2str(cur.y,cur.m);
-  ['month-select','mov-filter-month'].forEach(id=>{
+  ['month-select','mov-filter-month','prev-filter-month'].forEach(id=>{
     const el=document.getElementById(id);if(!el)return;
     const prev=el.value||curKey;
     el.innerHTML=months.map(m=>`<option value="${m.key}"${m.key===prev?' selected':''}>${m.label}</option>`).join('');
   });
   const ms=document.getElementById('seg-mes');
   if(ms){ms.innerHTML=MESES.map((m,i)=>`<option value="${i+1}">${m}</option>`).join('');}
+  ['prev-mes','mov-prev-mes'].forEach(id=>{ const el=document.getElementById(id); if(el){ el.innerHTML=MESES.map((m,i)=>`<option value="${i+1}">${m}</option>`).join(''); } });
 }
-function populateCatSelect() { const el=document.getElementById('mov-categoria');if(!el)return; el.innerHTML=db.categorias.map(c=>`<option value="${c}">${c}</option>`).join(''); }
-function populateMetodoSelect() { const el=document.getElementById('mov-metodo');if(!el)return; el.innerHTML=db.metodos.map(m=>`<option value="${m}">${m}</option>`).join(''); }
+function populateCatSelect() {
+  const el=document.getElementById('mov-categoria');if(!el)return;
+  el.innerHTML=db.categorias.map(c=>`<option value="${c}">${c}</option>`).join('');
+}
+function populateMetodoSelect() {
+  const el=document.getElementById('mov-metodo');if(!el)return;
+  el.innerHTML=db.metodos.map(m=>`<option value="${m}">${m}</option>`).join('');
+}
 
 // ============================================================
 // DASHBOARD
@@ -629,35 +775,82 @@ function renderDashboard() {
   const selVal=document.getElementById('month-select').value;
   const[ySel,mSel]=selVal.split('-').map(Number);
   const movs=movsOfMonth(ySel,mSel);
+
   const ingresos=movs.filter(m=>m.tipo==='ingreso').reduce((s,m)=>s+(parseFloat(m.importe)||0),0);
   const gastos=movs.filter(m=>m.tipo==='gasto').reduce((s,m)=>s+(parseFloat(m.importe)||0),0);
   const aportaciones=movs.filter(m=>m.tipo==='aportacion').reduce((s,m)=>s+(parseFloat(m.importe)||0),0);
-  const ahorroNeto=ingresos-gastos;
+  const ahorroNeto=ingresos-gastos; // flujo real del mes
   const pctAhorro=ingresos>0?(ahorroNeto/ingresos*100):0;
+
+  // INVERSIÓN (sin ahorro/colchón)
   const invAportado=getInversionTotalAportado();
   const invValor=getInversionValorActual();
   const invRentEur=invValor-invAportado;
   const invRentPct=invAportado>0?(invRentEur/invAportado*100):0;
+
+  // PATRIMONIO
   const patrimonio=getPatrimonio();
+
+  // Mes anterior para comparativa
   const prev=new Date(ySel,mSel-2,1);
   const prevMovs=movsOfMonth(prev.getFullYear(),prev.getMonth()+1);
   const prevGastos=prevMovs.filter(m=>m.tipo==='gasto').reduce((s,m)=>s+(parseFloat(m.importe)||0),0);
+
+  // Alertas
   const alerts=[];
-  if(db.config.alertas.gasto&&gastos>prevGastos&&prevGastos>0) alerts.push({t:'warning',msg:`Gastos de este mes (${fmt(gastos)}) superiores al anterior (${fmt(prevGastos)}).`});
-  if(db.config.alertas.ahorro&&db.objetivos.ahorro>0&&ahorroNeto<db.objetivos.ahorro) alerts.push({t:'warning',msg:`Ahorro neto (${fmt(ahorroNeto)}) por debajo del objetivo (${fmt(db.objetivos.ahorro)}).`});
-  if(db.config.alertas.colchon&&db.config.alertas.colchon>0){ const colchon=getColchonValor(); if(colchon<parseFloat(db.config.alertas.colchon)) alerts.push({t:'danger',msg:`Colchón de seguridad (${fmt(colchon)}) por debajo del mínimo (${fmt(db.config.alertas.colchon)}).`}); }
-  db.categorias.forEach(cat=>{ const lim=db.config.limites[cat]; if(!lim) return; const gCat=movs.filter(m=>m.tipo==='gasto'&&m.categoria===cat).reduce((s,m)=>s+(parseFloat(m.importe)||0),0); if(gCat>lim) alerts.push({t:'warning',msg:`Categoría "${cat}": ${fmt(gCat)} (límite ${fmt(lim)}).`}); });
+  if(db.config.alertas.gasto&&gastos>prevGastos&&prevGastos>0)
+    alerts.push({t:'warning',msg:`Gastos de este mes (${fmt(gastos)}) superiores al anterior (${fmt(prevGastos)}).`});
+  if(db.config.alertas.ahorro&&db.objetivos.ahorro>0&&ahorroNeto<db.objetivos.ahorro)
+    alerts.push({t:'warning',msg:`Ahorro neto (${fmt(ahorroNeto)}) por debajo del objetivo (${fmt(db.objetivos.ahorro)}).`});
+  if(db.config.alertas.colchon&&db.config.alertas.colchon>0){
+    const colchon=getColchonValor();
+    if(colchon<parseFloat(db.config.alertas.colchon))
+      alerts.push({t:'danger',msg:`Colchón de seguridad (${fmt(colchon)}) por debajo del mínimo (${fmt(db.config.alertas.colchon)}).`});
+  }
+  // Alertas de límite por categoría
+  db.categorias.forEach(cat=>{
+    const lim=db.config.limites[cat];
+    if(!lim) return;
+    const gCat=movs.filter(m=>m.tipo==='gasto'&&m.categoria===cat).reduce((s,m)=>s+(parseFloat(m.importe)||0),0);
+    if(gCat>lim) alerts.push({t:'warning',msg:`Categoría "${cat}": ${fmt(gCat)} (límite ${fmt(lim)}).`});
+  });
   document.getElementById('dash-alerts').innerHTML=alerts.map(a=>`<div class="alert alert-${a.t}">⚠️ ${a.msg}</div>`).join('');
+
   const cards=[
-    {label:'Ingresos',val:fmt(ingresos),cls:'green'}, {label:'Gastos',val:fmt(gastos),cls:'red'}, {label:'Ahorro neto',val:fmt(ahorroNeto),cls:ahorroNeto>=0?'green':'red'}, {label:'% Ahorro',val:fmtPct(pctAhorro),cls:'blue'}, {label:'Aportaciones',val:fmt(aportaciones),cls:'purple'}, {label:'Capital invertido',val:fmt(invAportado),cls:'amber'}, {label:'Valor inversiones',val:fmt(invValor),cls:'teal'}, {label:'Rent. inversión €',val:(invRentEur>=0?'+':'')+fmt(invRentEur),cls:invRentEur>=0?'green':'red'}, {label:'Rent. inversión %',val:(invRentPct>=0?'+':'')+fmtPct(invRentPct),cls:invRentPct>=0?'green':'red'}, {label:'Patrimonio total',val:fmt(patrimonio),cls:'blue'}
+    {label:'Ingresos',val:fmt(ingresos),cls:'green'},
+    {label:'Gastos',val:fmt(gastos),cls:'red'},
+    {label:'Ahorro neto',val:fmt(ahorroNeto),cls:ahorroNeto>=0?'green':'red'},
+    {label:'% Ahorro',val:fmtPct(pctAhorro),cls:'blue'},
+    {label:'Aportaciones',val:fmt(aportaciones),cls:'purple'},
+    {label:'Capital invertido',val:fmt(invAportado),cls:'amber'},
+    {label:'Valor inversiones',val:fmt(invValor),cls:'teal'},
+    {label:'Rent. inversión €',val:(invRentEur>=0?'+':'')+fmt(invRentEur),cls:invRentEur>=0?'green':'red'},
+    {label:'Rent. inversión %',val:(invRentPct>=0?'+':'')+fmtPct(invRentPct),cls:invRentPct>=0?'green':'red'},
+    {label:'Patrimonio total',val:fmt(patrimonio),cls:'blue'}
   ];
   document.getElementById('dash-cards').innerHTML=cards.map(c=>`<div class="card ${c.cls}"><div class="label">${c.label}</div><div class="value">${c.val}</div></div>`).join('');
+
+  // Gráfico IG
   buildChart('ch-igm',{type:'bar',data:{labels:['Ingresos','Gastos','Ahorro neto'],datasets:[{data:[ingresos,gastos,Math.max(0,ahorroNeto)],backgroundColor:['#2ecc71','#e74c3c','#4a9eff'],borderRadius:6}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>v+'€'},grid:{color:'rgba(255,255,255,0.05)'}},x:{grid:{display:false}}}}});
-  const catMap={}; movs.filter(m=>m.tipo==='gasto').forEach(m=>{catMap[m.categoria]=(catMap[m.categoria]||0)+(parseFloat(m.importe)||0)}); const catKeys=Object.keys(catMap);
-  buildChart('ch-cat',{type:'doughnut',data:{labels:catKeys.length?catKeys:['Sin gastos'],datasets:[{data:catKeys.length?catKeys.map(k=>catMap[k]):[1],backgroundColor:catKeys.length?catKeys.map(k=>db.catColores[k]||'#7f8c8d'):['#2a2a4a'],hoverOffset:8}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{color:'#a0a0c0',font:{size:11}}}}}});
-  const months=getMonths(12); const patData=months.map(({y,m})=>calcPatrimonioMes(y,m));
+
+  // Gráfico categorías gasto
+  const catMap={};
+  movs.filter(m=>m.tipo==='gasto').forEach(m=>{catMap[m.categoria]=(catMap[m.categoria]||0)+(parseFloat(m.importe)||0)});
+  const catKeys=Object.keys(catMap);
+  if(catKeys.length>0){
+    buildChart('ch-cat',{type:'doughnut',data:{labels:catKeys,datasets:[{data:catKeys.map(k=>catMap[k]),backgroundColor:catKeys.map(k=>db.catColores[k]||'#7f8c8d'),hoverOffset:8}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{color:'#a0a0c0',font:{size:11}}}}}});
+  }
+
+  // Gráfico patrimonio 12 meses
+  const months=getMonths(12);
+  const patData=months.map(({y,m})=>calcPatrimonioMes(y,m));
   buildChart('ch-pat',{type:'line',data:{labels:months.map(m=>m.label.substring(0,3)),datasets:[{data:patData,borderColor:'#4a9eff',backgroundColor:'rgba(74,158,255,0.1)',fill:true,tension:0.4,pointRadius:3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>v+'€'},grid:{color:'rgba(255,255,255,0.05)'}},x:{grid:{display:false}}}}});
-  const ahorroVal=getAhorroTotalValor(); const invVal=invValor; const totalProds=db.productos.reduce((s,p)=>s+getValorProducto(p),0); const efectivo=Math.max(0,patrimonio-totalProds);
+
+  // Gráfico distribución patrimonial (ahorro, inversión, efectivo)
+  const ahorroVal=getAhorroTotalValor();
+  const invVal=invValor;
+  const totalProds=db.productos.reduce((s,p)=>s+getValorProducto(p),0);
+  const efectivo=Math.max(0,patrimonio-totalProds);
   buildChart('ch-pat-dist',{type:'doughnut',data:{labels:['Ahorro (colchón+conservador)','Inversiones','Efectivo estimado'],datasets:[{data:[ahorroVal,invVal,efectivo],backgroundColor:['#4a9eff','#9b59b6','#2ecc71'],hoverOffset:8}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{color:'#a0a0c0',font:{size:11}}}}}});
 }
 
@@ -685,18 +878,177 @@ function renderMovimientos() {
 }
 function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function openMovModal(id){
-  populateCatSelect();populateMetodoSelect(); document.getElementById('mov-id').value=id||'';
-  if(id){ const m=db.movimientos.find(x=>x.id===id); document.getElementById('mov-modal-title').textContent='Editar movimiento'; document.getElementById('mov-fecha').value=m.fecha; document.getElementById('mov-tipo').value=m.tipo; document.getElementById('mov-concepto').value=m.concepto; document.getElementById('mov-importe').value=m.importe; document.getElementById('mov-categoria').value=m.categoria||''; document.getElementById('mov-subcat').value=m.subcat||''; document.getElementById('mov-metodo').value=m.metodo||''; document.getElementById('mov-comentario').value=m.comentario||''; }
-  else{ document.getElementById('mov-modal-title').textContent='Nuevo movimiento'; document.getElementById('mov-fecha').value=new Date().toISOString().split('T')[0]; document.getElementById('mov-tipo').value='gasto'; ['mov-concepto','mov-subcat','mov-comentario'].forEach(i=>document.getElementById(i).value=''); document.getElementById('mov-importe').value=''; }
+  populateCatSelect();populateMetodoSelect();
+  document.getElementById('mov-id').value=id||'';
+  if(id){
+    const m=db.movimientos.find(x=>x.id===id);
+    document.getElementById('mov-modal-title').textContent='Editar movimiento';
+    document.getElementById('mov-fecha').value=m.fecha;
+    document.getElementById('mov-tipo').value=m.tipo;
+    document.getElementById('mov-concepto').value=m.concepto;
+    document.getElementById('mov-importe').value=m.importe;
+    document.getElementById('mov-categoria').value=m.categoria||'';
+    document.getElementById('mov-subcat').value=m.subcat||'';
+    document.getElementById('mov-metodo').value=m.metodo||'';
+    document.getElementById('mov-comentario').value=m.comentario||'';
+  }else{
+    document.getElementById('mov-modal-title').textContent='Nuevo movimiento';
+    document.getElementById('mov-fecha').value=new Date().toISOString().split('T')[0];
+    document.getElementById('mov-tipo').value='gasto';
+    ['mov-concepto','mov-subcat','mov-comentario'].forEach(i=>document.getElementById(i).value='');
+    document.getElementById('mov-importe').value='';
+  }
   openModal('mov-modal');
 }
-function editMovimiento(id){openMovModal(id);} 
-async function delMovimiento(id){if(!confirm('¿Eliminar este movimiento?'))return;db.movimientos=db.movimientos.filter(m=>m.id!==id);await saveDB();renderMovimientos();}
-async function saveMovimiento(){
-  const importe=parseFloat(document.getElementById('mov-importe').value); if(isNaN(importe)||importe<0){showToast('El importe debe ser un número positivo','warning');return;} const concepto=document.getElementById('mov-concepto').value.trim(); if(!concepto){showToast('El concepto no puede estar vacío','warning');return;}
+function editMovimiento(id){openMovModal(id);}
+function delMovimiento(id){if(!confirm('¿Eliminar este movimiento?'))return;db.movimientos=db.movimientos.filter(m=>m.id!==id);saveDB();renderMovimientos();}
+function saveMovimiento(){
+  const importe=parseFloat(document.getElementById('mov-importe').value);
+  if(isNaN(importe)||importe<0){showToast('El importe debe ser un número positivo','warning');return;}
+  const concepto=document.getElementById('mov-concepto').value.trim();
+  if(!concepto){showToast('El concepto no puede estar vacío','warning');return;}
   const id=document.getElementById('mov-id').value;
-  const mov={ id:id||uid(), fecha:document.getElementById('mov-fecha').value, tipo:document.getElementById('mov-tipo').value, concepto,importe, categoria:document.getElementById('mov-categoria').value, subcat:document.getElementById('mov-subcat').value, metodo:document.getElementById('mov-metodo').value, comentario:document.getElementById('mov-comentario').value };
-  if(id){db.movimientos=db.movimientos.map(m=>m.id===id?mov:m);} else{db.movimientos.push(mov);} await saveDB();closeModal('mov-modal');renderMovimientos();
+  const mov={
+    id:id||uid(),
+    fecha:document.getElementById('mov-fecha').value,
+    tipo:document.getElementById('mov-tipo').value,
+    concepto,importe,
+    categoria:document.getElementById('mov-categoria').value,
+    subcat:document.getElementById('mov-subcat').value,
+    metodo:document.getElementById('mov-metodo').value,
+    comentario:document.getElementById('mov-comentario').value
+  };
+  if(id){db.movimientos=db.movimientos.map(m=>m.id===id?mov:m);}
+  else{db.movimientos.push(mov);}
+  saveDB();closeModal('mov-modal');renderMovimientos();
+}
+
+
+// ============================================================
+// GASTOS PREVISTOS
+// ============================================================
+function previstoOcurreEnMes(g, y, m) {
+  if (g.activo === false) return false;
+  const refMonth = parseInt(g.mes || m);
+  const freq = g.frecuencia || 'mensual';
+  if (freq === 'mensual') return true;
+  if (freq === 'trimestral') return ((m - refMonth) % 3 + 3) % 3 === 0;
+  if (freq === 'semestral') return ((m - refMonth) % 6 + 6) % 6 === 0;
+  if (freq === 'anual') return refMonth === m;
+  if (freq === 'puntual') return refMonth === m && (!g.anio || parseInt(g.anio) === y);
+  return false;
+}
+function getPrevistosMes(y, m) {
+  return (db.gastosPrevistos || []).filter(g => previstoOcurreEnMes(g, y, m));
+}
+function renderGastosPrevistos() {
+  const sel = document.getElementById('prev-filter-month')?.value || ym2str(currentYM().y,currentYM().m);
+  const [y,m] = sel.split('-').map(Number);
+  const previstos = getPrevistosMes(y,m);
+  const totalPrevisto = previstos.reduce((s,g)=>s+(parseFloat(g.importe)||0),0);
+  const reales = movsOfMonth(y,m).filter(x=>x.tipo==='gasto');
+  const totalReal = reales.reduce((s,g)=>s+(parseFloat(g.importe)||0),0);
+  const diferencia = totalPrevisto - totalReal;
+  const totalAnual = (db.gastosPrevistos || []).reduce((sum,g)=>{
+    let veces = 0;
+    const freq = g.frecuencia || 'mensual';
+    if (g.activo === false) veces = 0;
+    else if (freq === 'mensual') veces = 12;
+    else if (freq === 'trimestral') veces = 4;
+    else if (freq === 'semestral') veces = 2;
+    else if (freq === 'anual' || freq === 'puntual') veces = 1;
+    return sum + (parseFloat(g.importe)||0) * veces;
+  },0);
+  document.getElementById('prev-summary').innerHTML=`
+    <div class="card amber"><div class="label">Previsto del mes</div><div class="value">${fmt(totalPrevisto)}</div></div>
+    <div class="card red"><div class="label">Real del mes</div><div class="value">${fmt(totalReal)}</div></div>
+    <div class="card ${diferencia>=0?'blue':'red'}"><div class="label">Margen previsto</div><div class="value">${diferencia>=0?'+':''}${fmt(diferencia)}</div><div class="sub">Previsto − real</div></div>
+    <div class="card purple"><div class="label">Impacto anual estimado</div><div class="value">${fmt(totalAnual)}</div></div>`;
+  const freqLabel={mensual:'Mensual',trimestral:'Trimestral',semestral:'Semestral',anual:'Anual',puntual:'Una vez'};
+  const sorted=[...previstos].sort((a,b)=>(parseInt(a.dia)||1)-(parseInt(b.dia)||1));
+  if(!sorted.length){
+    document.getElementById('prev-table-wrap').innerHTML=`<div class="empty">No hay gastos previstos para este mes</div>`;
+  } else {
+    document.getElementById('prev-table-wrap').innerHTML=`<table><thead><tr><th>Día</th><th>Concepto</th><th>Frecuencia</th><th>Categoría</th><th>Importe</th><th></th></tr></thead><tbody>${sorted.map(g=>`<tr><td>${g.dia||'—'}</td><td>${escHtml(g.concepto)}</td><td><span class="badge badge-blue">${freqLabel[g.frecuencia]||g.frecuencia}</span></td><td>${escHtml(g.categoria||'')}</td><td class="text-amber">${fmt(parseFloat(g.importe)||0)}</td><td><button class="icon-btn" onclick="editPrevisto('${g.id}')">✏️</button><button class="icon-btn" onclick="delPrevisto('${g.id}')">🗑️</button></td></tr>`).join('')}</tbody></table>`;
+  }
+  buildChart('ch-prev',{type:'bar',data:{labels:['Previsto','Real'],datasets:[{data:[totalPrevisto,totalReal],backgroundColor:['#f39c12','#e74c3c'],borderRadius:6}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>v+'€'},grid:{color:'rgba(255,255,255,0.05)'}},x:{grid:{display:false}}}}});
+}
+function openPrevistoModal(id){
+  populateCatSelect(); populateMetodoSelect(); populatePrevistoSelects();
+  document.getElementById('prev-id').value=id||'';
+  const {y,m}=currentYM();
+  if(id){
+    const g=(db.gastosPrevistos||[]).find(x=>x.id===id);
+    document.getElementById('prev-modal-title').textContent='Editar gasto previsto';
+    document.getElementById('prev-concepto').value=g.concepto||'';
+    document.getElementById('prev-importe').value=g.importe||0;
+    document.getElementById('prev-categoria').value=g.categoria||'Otros';
+    document.getElementById('prev-frecuencia').value=g.frecuencia||'mensual';
+    document.getElementById('prev-dia').value=g.dia||1;
+    document.getElementById('prev-mes').value=g.mes||m;
+    document.getElementById('prev-anio').value=g.anio||y;
+    document.getElementById('prev-metodo').value=g.metodo||'';
+    document.getElementById('prev-activo').checked=g.activo!==false;
+    document.getElementById('prev-comentario').value=g.comentario||'';
+  } else {
+    document.getElementById('prev-modal-title').textContent='Nuevo gasto previsto';
+    document.getElementById('prev-concepto').value='';
+    document.getElementById('prev-importe').value='';
+    document.getElementById('prev-categoria').value=db.categorias[0]||'Otros';
+    document.getElementById('prev-frecuencia').value='mensual';
+    document.getElementById('prev-dia').value=1;
+    document.getElementById('prev-mes').value=m;
+    document.getElementById('prev-anio').value=y;
+    document.getElementById('prev-metodo').value=db.metodos[0]||'';
+    document.getElementById('prev-activo').checked=true;
+    document.getElementById('prev-comentario').value='';
+  }
+  openModal('prev-modal');
+}
+function populatePrevistoSelects(){
+  const pc=document.getElementById('prev-categoria'); if(pc) pc.innerHTML=db.categorias.map(c=>`<option value="${c}">${c}</option>`).join('');
+  const pm=document.getElementById('prev-metodo'); if(pm) pm.innerHTML=db.metodos.map(m=>`<option value="${m}">${m}</option>`).join('');
+  ['prev-mes','mov-prev-mes'].forEach(id=>{ const el=document.getElementById(id); if(el) el.innerHTML=MESES.map((m,i)=>`<option value="${i+1}">${m}</option>`).join(''); });
+}
+function editPrevisto(id){openPrevistoModal(id);}
+async function delPrevisto(id){
+  if(!confirm('¿Eliminar este gasto previsto?')) return;
+  db.gastosPrevistos=(db.gastosPrevistos||[]).filter(g=>g.id!==id);
+  await saveDB(); renderGastosPrevistos();
+}
+async function savePrevisto(){
+  const concepto=document.getElementById('prev-concepto').value.trim();
+  const importe=parseFloat(document.getElementById('prev-importe').value);
+  if(!concepto){showToast('El concepto no puede estar vacío','warning');return;}
+  if(isNaN(importe)||importe<0){showToast('El importe debe ser positivo','warning');return;}
+  const id=document.getElementById('prev-id').value;
+  const g={
+    id:id||uid(), concepto, importe,
+    categoria:document.getElementById('prev-categoria').value,
+    frecuencia:document.getElementById('prev-frecuencia').value,
+    dia:parseInt(document.getElementById('prev-dia').value)||1,
+    mes:parseInt(document.getElementById('prev-mes').value)||1,
+    anio:parseInt(document.getElementById('prev-anio').value)||new Date().getFullYear(),
+    metodo:document.getElementById('prev-metodo').value,
+    activo:document.getElementById('prev-activo').checked,
+    comentario:document.getElementById('prev-comentario').value
+  };
+  db.gastosPrevistos=db.gastosPrevistos||[];
+  if(id) db.gastosPrevistos=db.gastosPrevistos.map(x=>x.id===id?g:x);
+  else db.gastosPrevistos.push(g);
+  await saveDB(); closeModal('prev-modal'); renderGastosPrevistos();
+}
+function crearPrevistoDesdeMovimiento(mov){
+  if(mov.tipo!=='gasto' || !document.getElementById('mov-crear-previsto')?.checked) return;
+  const fecha=new Date(mov.fecha);
+  db.gastosPrevistos=db.gastosPrevistos||[];
+  db.gastosPrevistos.push({
+    id:uid(), concepto:mov.concepto, importe:parseFloat(mov.importe)||0,
+    categoria:mov.categoria||'Otros', frecuencia:document.getElementById('mov-prev-frecuencia').value||'mensual',
+    dia:fecha.getDate(), mes:parseInt(document.getElementById('mov-prev-mes').value)||fecha.getMonth()+1,
+    anio:fecha.getFullYear(), metodo:mov.metodo||'', activo:true,
+    comentario:'Creado automáticamente desde un movimiento.'
+  });
 }
 
 // ============================================================
@@ -707,29 +1059,69 @@ function renderCategorias(){
   document.getElementById('metodo-list').innerHTML=db.metodos.map(m=>`<div class="flex jcsb gap8 mb16"><span style="font-size:13px">${escHtml(m)}</span><button class="icon-btn" onclick="delMetodo('${escHtml(m)}')">🗑️</button></div>`).join('');
 }
 function openCatModal(){document.getElementById('cat-nombre').value='';openModal('cat-modal');}
-async function saveCat(){const n=document.getElementById('cat-nombre').value.trim();if(!n)return;if(!db.categorias.includes(n)){db.categorias.push(n);db.catColores[n]=document.getElementById('cat-color').value;}await saveDB();closeModal('cat-modal');renderCategorias();}
-async function delCat(c){if(!confirm(`¿Eliminar categoría "${c}"?`))return;db.categorias=db.categorias.filter(x=>x!==c);delete db.catColores[c];await saveDB();renderCategorias();}
+function saveCat(){const n=document.getElementById('cat-nombre').value.trim();if(!n)return;if(!db.categorias.includes(n)){db.categorias.push(n);db.catColores[n]=document.getElementById('cat-color').value;}saveDB();closeModal('cat-modal');renderCategorias();}
+function delCat(c){if(!confirm(`¿Eliminar categoría "${c}"?`))return;db.categorias=db.categorias.filter(x=>x!==c);delete db.catColores[c];saveDB();renderCategorias();}
 function openMetodoModal(){document.getElementById('metodo-nombre').value='';openModal('metodo-modal');}
-async function saveMetodo(){const n=document.getElementById('metodo-nombre').value.trim();if(!n)return;if(!db.metodos.includes(n))db.metodos.push(n);await saveDB();closeModal('metodo-modal');renderCategorias();}
-async function delMetodo(m){if(!confirm(`¿Eliminar método "${m}"?`))return;db.metodos=db.metodos.filter(x=>x!==m);await saveDB();renderCategorias();}
+function saveMetodo(){const n=document.getElementById('metodo-nombre').value.trim();if(!n)return;if(!db.metodos.includes(n))db.metodos.push(n);saveDB();closeModal('metodo-modal');renderCategorias();}
+function delMetodo(m){if(!confirm(`¿Eliminar método "${m}"?`))return;db.metodos=db.metodos.filter(x=>x!==m);saveDB();renderCategorias();}
 
 // ============================================================
-// AHORRO E INVERSIONES
+// AHORRO (colchón + conservador, SEPARADOS)
 // ============================================================
 function renderAhorro(){
-  const colchones=db.productos.filter(p=>p.tipo==='colchon'); const conservadores=db.productos.filter(p=>p.tipo==='ahorro_conservador');
-  const buildCard=(p)=>{ const val=getValorProducto(p); const ap=getCapitalTotalProducto(p); const rent=val-ap; const rentPct=ap>0?(rent/ap*100):0; return `<div class="card ${p.tipo==='colchon'?'blue':'teal'}"><div class="label">${escHtml(p.nombre)}</div><div class="value">${fmt(val)}</div><div class="sub">${rent>=0?'▲':'▼'} ${fmtPct(rentPct)} | ${escHtml(p.entidad||'')}</div></div>`; };
+  const colchones=db.productos.filter(p=>p.tipo==='colchon');
+  const conservadores=db.productos.filter(p=>p.tipo==='ahorro_conservador');
+  const buildCard=(p)=>{
+    const val=getValorProducto(p);
+    const ap=getCapitalTotalProducto(p);
+    const rent=val-ap;
+    const rentPct=ap>0?(rent/ap*100):0;
+    return `<div class="card ${p.tipo==='colchon'?'blue':'teal'}"><div class="label">${escHtml(p.nombre)}</div><div class="value">${fmt(val)}</div><div class="sub">${rent>=0?'▲':'▼'} ${fmtPct(rentPct)} | ${escHtml(p.entidad||'')}</div></div>`;
+  };
   document.getElementById('ahorro-cards-colchon').innerHTML=colchones.length?colchones.map(buildCard).join(''):`<div class="empty" style="padding:16px">Sin productos de colchón. Añádelos en Productos financieros.</div>`;
   document.getElementById('ahorro-cards-conservador').innerHTML=conservadores.length?conservadores.map(buildCard).join(''):`<div class="empty" style="padding:16px">Sin productos de ahorro conservador.</div>`;
-  const months=getMonths(12); const ahorroData=months.map(({y,m})=>{ const mv=movsOfMonth(y,m); const i=mv.filter(x=>x.tipo==='ingreso').reduce((s,x)=>s+(parseFloat(x.importe)||0),0); const g=mv.filter(x=>x.tipo==='gasto').reduce((s,x)=>s+(parseFloat(x.importe)||0),0); return Math.max(0,i-g); });
+
+  // Gráfico ahorro neto mensual
+  const months=getMonths(12);
+  const ahorroData=months.map(({y,m})=>{
+    const mv=movsOfMonth(y,m);
+    const i=mv.filter(x=>x.tipo==='ingreso').reduce((s,x)=>s+(parseFloat(x.importe)||0),0);
+    const g=mv.filter(x=>x.tipo==='gasto').reduce((s,x)=>s+(parseFloat(x.importe)||0),0);
+    return Math.max(0,i-g);
+  });
   buildChart('ch-ahorro',{type:'bar',data:{labels:months.map(m=>m.label.substring(0,3)),datasets:[{data:ahorroData,backgroundColor:'rgba(74,158,255,0.7)',borderRadius:6}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>v+'€'},grid:{color:'rgba(255,255,255,0.05)'}},x:{grid:{display:false}}}}});
 }
+
+// ============================================================
+// INVERSIONES (solo fondos/ETFs/acciones)
+// ============================================================
 function renderInversiones(){
-  const inversiones=getProductosByTipo(TIPOS_INVERSION); const totalAp=getInversionTotalAportado(); const totalVal=getInversionValorActual(); const rent=totalVal-totalAp; const rentPct=totalAp>0?(rent/totalAp*100):0;
-  document.getElementById('inv-cards').innerHTML=`<div class="card amber"><div class="label">Capital aportado</div><div class="value">${fmt(totalAp)}</div></div><div class="card teal"><div class="label">Valor actual</div><div class="value">${fmt(totalVal)}</div></div><div class="card ${rent>=0?'green':'red'}"><div class="label">Rentabilidad €</div><div class="value">${rent>=0?'+':''}${fmt(rent)}</div></div><div class="card ${rentPct>=0?'green':'red'}"><div class="label">Rentabilidad %</div><div class="value">${rentPct>=0?'+':''}${fmtPct(rentPct)}</div></div>`;
-  const pColors=['#4a9eff','#2ecc71','#e74c3c','#f39c12','#9b59b6','#1abc9c','#e67e22','#16a085']; const prodLabels=inversiones.map(p=>p.nombre); const prodVals=inversiones.map(p=>getValorProducto(p));
-  buildChart('ch-inv-dist',{type:'doughnut',data:{labels:prodLabels.length?prodLabels:['Sin inversiones'],datasets:[{data:prodVals.length?prodVals:[1],backgroundColor:prodVals.length?pColors.slice(0,prodLabels.length):['#2a2a4a'],hoverOffset:8}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{color:'#a0a0c0',font:{size:11}}}}}});
-  const months=getMonths(12); const evData=months.map(({y,m})=>{ const key=ym2str(y,m); return inversiones.reduce((sum,p)=>{ const pSegs=db.seguimiento.filter(s=>s.prodId===p.id&&ym2str(s.anio,s.mes)<=key); if(!pSegs.length) return sum+(parseFloat(p.capitalInicial)||0); const last=pSegs.sort((a,b)=>b.anio-a.anio||b.mes-a.mes)[0]; return sum+(parseFloat(last.valorMercado)||0); },0); });
+  const inversiones=getProductosByTipo(TIPOS_INVERSION);
+  const totalAp=getInversionTotalAportado();
+  const totalVal=getInversionValorActual();
+  const rent=totalVal-totalAp;
+  const rentPct=totalAp>0?(rent/totalAp*100):0;
+  document.getElementById('inv-cards').innerHTML=`
+    <div class="card amber"><div class="label">Capital aportado</div><div class="value">${fmt(totalAp)}</div></div>
+    <div class="card teal"><div class="label">Valor actual</div><div class="value">${fmt(totalVal)}</div></div>
+    <div class="card ${rent>=0?'green':'red'}"><div class="label">Rentabilidad €</div><div class="value">${rent>=0?'+':''}${fmt(rent)}</div></div>
+    <div class="card ${rentPct>=0?'green':'red'}"><div class="label">Rentabilidad %</div><div class="value">${rentPct>=0?'+':''}${fmtPct(rentPct)}</div></div>`;
+
+  const pColors=['#4a9eff','#2ecc71','#e74c3c','#f39c12','#9b59b6','#1abc9c','#e67e22','#16a085'];
+  const prodLabels=inversiones.map(p=>p.nombre);
+  const prodVals=inversiones.map(p=>getValorProducto(p));
+  buildChart('ch-inv-dist',{type:'doughnut',data:{labels:prodLabels,datasets:[{data:prodVals,backgroundColor:pColors.slice(0,prodLabels.length),hoverOffset:8}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{color:'#a0a0c0',font:{size:11}}}}}});
+
+  const months=getMonths(12);
+  const evData=months.map(({y,m})=>{
+    const key=ym2str(y,m);
+    return inversiones.reduce((sum,p)=>{
+      const pSegs=db.seguimiento.filter(s=>s.prodId===p.id&&ym2str(s.anio,s.mes)<=key);
+      if(!pSegs.length) return sum+(parseFloat(p.capitalInicial)||0);
+      const last=pSegs.sort((a,b)=>b.anio-a.anio||b.mes-a.mes)[0];
+      return sum+(parseFloat(last.valorMercado)||0);
+    },0);
+  });
   buildChart('ch-inv-ev',{type:'line',data:{labels:months.map(m=>m.label.substring(0,3)),datasets:[{data:evData,borderColor:'#2ecc71',backgroundColor:'rgba(46,204,113,0.1)',fill:true,tension:0.4,pointRadius:3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>v+'€'},grid:{color:'rgba(255,255,255,0.05)'}},x:{grid:{display:false}}}}});
 }
 
@@ -739,58 +1131,471 @@ function renderInversiones(){
 const tipoLabels={colchon:'🛡️ Colchón',ahorro_conservador:'💙 Ahorro conservador',fondo_indexado:'📈 Fondo indexado',etf:'📊 ETF',fondo_activo:'🎯 Fondo activo',fondo_monetario:'💰 Fondo monetario',acciones:'📉 Acciones',otro:'📦 Otro'};
 const riesgoLabel={muy_bajo:'Muy bajo',bajo:'Bajo',medio:'Medio',alto:'Alto',muy_alto:'Muy alto'};
 const riesgoCls={muy_bajo:'badge-blue',bajo:'badge-teal',medio:'badge-amber',alto:'badge-red',muy_alto:'badge-red'};
+
 function renderProductos(){
   if(!db.productos.length){document.getElementById('prod-list').innerHTML=`<div class="empty">No hay productos. Añade el primero con el botón de arriba.</div>`;return;}
   document.getElementById('prod-list').innerHTML=db.productos.map(p=>{
-    const segs=db.seguimiento.filter(s=>s.prodId===p.id).sort((a,b)=>b.anio-a.anio||b.mes-a.mes); const ap=getCapitalTotalProducto(p); const val=getValorProducto(p); const rent=val-ap; const rentPct=ap>0?(rent/ap*100):0;
-    const segRows=segs.slice(0,8).map(sg=>{ const segsHasta=db.seguimiento.filter(s=>s.prodId===p.id&&(s.anio<sg.anio||(s.anio===sg.anio&&s.mes<=sg.mes))); const apHasta=(parseFloat(p.capitalInicial)||0)+segsHasta.reduce((s2,s)=>s2+(parseFloat(s.aportacion)||0),0); const r=(parseFloat(sg.valorMercado)||0)-apHasta; const rp=apHasta>0?(r/apHasta*100):0; return {sg,apHasta,r,rp}; });
-    return `<div class="panel mb16"><div class="flex jcsb mb16"><div><div style="font-size:16px;font-weight:600">${escHtml(p.nombre)}</div><div style="font-size:12px;color:var(--text3)">${tipoLabels[p.tipo]||p.tipo} · ${escHtml(p.entidad||'—')}${p.isin?' · '+escHtml(p.isin):''}</div></div><div class="flex gap8"><span class="badge ${riesgoCls[p.riesgo]}">${riesgoLabel[p.riesgo]||p.riesgo}</span><button class="btn btn-primary btn-sm" onclick="openSegModal('${p.id}')">+ Registrar mes</button><button class="icon-btn" onclick="editProducto('${p.id}')">✏️</button><button class="icon-btn" onclick="delProducto('${p.id}')">🗑️</button></div></div><div class="cards mb16"><div class="card amber"><div class="label">Capital aportado</div><div class="value">${fmt(ap)}</div></div><div class="card teal"><div class="label">Valor actual</div><div class="value">${fmt(val)}</div></div><div class="card ${rent>=0?'green':'red'}"><div class="label">Rentabilidad €</div><div class="value">${rent>=0?'+':''}${fmt(rent)}</div></div><div class="card ${rentPct>=0?'green':'red'}"><div class="label">Rentabilidad %</div><div class="value">${rentPct>=0?'+':''}${fmtPct(rentPct)}</div></div></div>${segRows.length?`<table><thead><tr><th>Mes/Año</th><th>Aportación</th><th>Capital acum.</th><th>Valor mercado</th><th>Rent. €</th><th>Rent. %</th><th></th></tr></thead><tbody>${segRows.map(({sg,apHasta,r,rp})=>`<tr><td>${MESES[sg.mes-1]} ${sg.anio}</td><td>${fmt(parseFloat(sg.aportacion)||0)}</td><td>${fmt(apHasta)}</td><td>${fmt(parseFloat(sg.valorMercado)||0)}</td><td class="${r>=0?'text-green':'text-red'}">${r>=0?'+':''}${fmt(r)}</td><td class="${rp>=0?'text-green':'text-red'}">${rp>=0?'+':''}${fmtPct(rp)}</td><td><button class="icon-btn" onclick="delSeg('${sg.id}')">🗑️</button></td></tr>`).join('')}</tbody></table>`:`<div class="empty" style="padding:16px">Sin registros mensuales aún.</div>`}</div>`;
+    const segs=db.seguimiento.filter(s=>s.prodId===p.id).sort((a,b)=>b.anio-a.anio||b.mes-a.mes);
+    const ap=getCapitalTotalProducto(p);
+    const val=getValorProducto(p);
+    const rent=val-ap;
+    const rentPct=ap>0?(rent/ap*100):0;
+
+    // Tabla de seguimiento: cálculo correcto de capital acumulado por fila
+    const segsAsc=[...segs].reverse(); // orden cronológico
+    let acumAp=parseFloat(p.capitalInicial)||0;
+    const segRows=segs.slice(0,8).map(sg=>{
+      // capital acumulado hasta ese mes: capitalInicial + aportaciones hasta ese mes inclusive
+      const segsHasta=db.seguimiento.filter(s=>s.prodId===p.id&&(s.anio<sg.anio||(s.anio===sg.anio&&s.mes<=sg.mes)));
+      const apHasta=(parseFloat(p.capitalInicial)||0)+segsHasta.reduce((s2,s)=>s2+(parseFloat(s.aportacion)||0),0);
+      const r=(parseFloat(sg.valorMercado)||0)-apHasta;
+      const rp=apHasta>0?(r/apHasta*100):0;
+      return {sg,apHasta,r,rp};
+    });
+
+    return `<div class="panel mb16">
+      <div class="flex jcsb mb16">
+        <div><div style="font-size:16px;font-weight:600">${escHtml(p.nombre)}</div><div style="font-size:12px;color:var(--text3)">${tipoLabels[p.tipo]||p.tipo} · ${escHtml(p.entidad||'—')}${p.isin?' · '+escHtml(p.isin):''}</div></div>
+        <div class="flex gap8"><span class="badge ${riesgoCls[p.riesgo]}">${riesgoLabel[p.riesgo]||p.riesgo}</span><button class="btn btn-primary btn-sm" onclick="openSegModal('${p.id}')">+ Registrar mes</button><button class="icon-btn" onclick="editProducto('${p.id}')">✏️</button><button class="icon-btn" onclick="delProducto('${p.id}')">🗑️</button></div>
+      </div>
+      <div class="cards mb16">
+        <div class="card amber"><div class="label">Capital aportado</div><div class="value">${fmt(ap)}</div></div>
+        <div class="card teal"><div class="label">Valor actual</div><div class="value">${fmt(val)}</div></div>
+        <div class="card ${rent>=0?'green':'red'}"><div class="label">Rentabilidad €</div><div class="value">${rent>=0?'+':''}${fmt(rent)}</div></div>
+        <div class="card ${rentPct>=0?'green':'red'}"><div class="label">Rentabilidad %</div><div class="value">${rentPct>=0?'+':''}${fmtPct(rentPct)}</div></div>
+      </div>
+      ${segRows.length?`<table><thead><tr><th>Mes/Año</th><th>Aportación</th><th>Capital acum.</th><th>Valor mercado</th><th>Rent. €</th><th>Rent. %</th><th></th></tr></thead><tbody>${segRows.map(({sg,apHasta,r,rp})=>`<tr><td>${MESES[sg.mes-1]} ${sg.anio}</td><td>${fmt(parseFloat(sg.aportacion)||0)}</td><td>${fmt(apHasta)}</td><td>${fmt(parseFloat(sg.valorMercado)||0)}</td><td class="${r>=0?'text-green':'text-red'}">${r>=0?'+':''}${fmt(r)}</td><td class="${rp>=0?'text-green':'text-red'}">${rp>=0?'+':''}${fmtPct(rp)}</td><td><button class="icon-btn" onclick="delSeg('${sg.id}')">🗑️</button></td></tr>`).join('')}</tbody></table>`:`<div class="empty" style="padding:16px">Sin registros mensuales aún.</div>`}
+    </div>`;
   }).join('');
 }
-function openProdModal(id){ document.getElementById('prod-id').value=id||''; if(id){ const p=db.productos.find(x=>x.id===id); document.getElementById('prod-modal-title').textContent='Editar producto'; document.getElementById('prod-nombre').value=p.nombre; document.getElementById('prod-tipo').value=p.tipo; document.getElementById('prod-entidad').value=p.entidad||''; document.getElementById('prod-isin').value=p.isin||''; document.getElementById('prod-riesgo').value=p.riesgo||'bajo'; document.getElementById('prod-capital').value=p.capitalInicial||0; document.getElementById('prod-comentario').value=p.comentario||''; } else{ document.getElementById('prod-modal-title').textContent='Nuevo producto financiero'; ['prod-nombre','prod-entidad','prod-isin','prod-comentario'].forEach(i=>document.getElementById(i).value=''); document.getElementById('prod-capital').value=0; document.getElementById('prod-tipo').value='fondo_indexado'; document.getElementById('prod-riesgo').value='bajo'; } openModal('prod-modal'); }
-function editProducto(id){openProdModal(id);} 
-async function delProducto(id){if(!confirm('¿Eliminar este producto y todo su seguimiento?'))return;db.productos=db.productos.filter(p=>p.id!==id);db.seguimiento=db.seguimiento.filter(s=>s.prodId!==id);await saveDB();renderProductos();}
-async function saveProducto(){ const nombre=document.getElementById('prod-nombre').value.trim(); if(!nombre){showToast('El nombre del producto no puede estar vacío','warning');return;} const cap=parseFloat(document.getElementById('prod-capital').value)||0; const id=document.getElementById('prod-id').value; const p={ id:id||uid(),nombre, tipo:document.getElementById('prod-tipo').value, entidad:document.getElementById('prod-entidad').value, isin:document.getElementById('prod-isin').value, riesgo:document.getElementById('prod-riesgo').value, capitalInicial:cap, comentario:document.getElementById('prod-comentario').value }; if(id){db.productos=db.productos.map(x=>x.id===id?p:x);} else{db.productos.push(p);} await saveDB();closeModal('prod-modal');renderProductos(); }
-function openSegModal(prodId){ const p=db.productos.find(x=>x.id===prodId); document.getElementById('seg-prod-id').value=prodId; document.getElementById('seg-modal-title').textContent='Registrar valor — '+p.nombre; const {y,m}=currentYM(); const ms=document.getElementById('seg-mes'); ms.innerHTML=MESES.map((mn,i)=>`<option value="${i+1}"${i+1===m?' selected':''}>${mn}</option>`).join(''); document.getElementById('seg-anio').value=y; document.getElementById('seg-aportacion').value=0; document.getElementById('seg-valor').value=''; document.getElementById('seg-comentario').value=''; openModal('seg-modal'); }
-async function saveSeguimiento(){ const valorMercado=parseFloat(document.getElementById('seg-valor').value); if(isNaN(valorMercado)||valorMercado<0){showToast('El valor de mercado debe ser un número positivo','warning');return;} const seg={ id:uid(), prodId:document.getElementById('seg-prod-id').value, mes:parseInt(document.getElementById('seg-mes').value), anio:parseInt(document.getElementById('seg-anio').value), aportacion:parseFloat(document.getElementById('seg-aportacion').value)||0, valorMercado, comentario:document.getElementById('seg-comentario').value }; db.seguimiento=db.seguimiento.filter(s=>!(s.prodId===seg.prodId&&s.mes===seg.mes&&s.anio===seg.anio)); db.seguimiento.push(seg); await saveDB();closeModal('seg-modal');renderProductos(); }
-async function delSeg(id){if(!confirm('¿Eliminar este registro?'))return;db.seguimiento=db.seguimiento.filter(s=>s.id!==id);await saveDB();renderProductos();}
+
+function openProdModal(id){
+  document.getElementById('prod-id').value=id||'';
+  if(id){
+    const p=db.productos.find(x=>x.id===id);
+    document.getElementById('prod-modal-title').textContent='Editar producto';
+    document.getElementById('prod-nombre').value=p.nombre;
+    document.getElementById('prod-tipo').value=p.tipo;
+    document.getElementById('prod-entidad').value=p.entidad||'';
+    document.getElementById('prod-isin').value=p.isin||'';
+    document.getElementById('prod-riesgo').value=p.riesgo||'bajo';
+    document.getElementById('prod-capital').value=p.capitalInicial||0;
+    document.getElementById('prod-comentario').value=p.comentario||'';
+  }else{
+    document.getElementById('prod-modal-title').textContent='Nuevo producto financiero';
+    ['prod-nombre','prod-entidad','prod-isin','prod-comentario'].forEach(i=>document.getElementById(i).value='');
+    document.getElementById('prod-capital').value=0;
+    document.getElementById('prod-tipo').value='fondo_indexado';
+    document.getElementById('prod-riesgo').value='bajo';
+  }
+  openModal('prod-modal');
+}
+function editProducto(id){openProdModal(id);}
+function delProducto(id){if(!confirm('¿Eliminar este producto y todo su seguimiento?'))return;db.productos=db.productos.filter(p=>p.id!==id);db.seguimiento=db.seguimiento.filter(s=>s.prodId!==id);saveDB();renderProductos();}
+function saveProducto(){
+  const nombre=document.getElementById('prod-nombre').value.trim();
+  if(!nombre){showToast('El nombre del producto no puede estar vacío','warning');return;}
+  const cap=parseFloat(document.getElementById('prod-capital').value)||0;
+  const id=document.getElementById('prod-id').value;
+  const p={
+    id:id||uid(),nombre,
+    tipo:document.getElementById('prod-tipo').value,
+    entidad:document.getElementById('prod-entidad').value,
+    isin:document.getElementById('prod-isin').value,
+    riesgo:document.getElementById('prod-riesgo').value,
+    capitalInicial:cap,
+    comentario:document.getElementById('prod-comentario').value
+  };
+  if(id){db.productos=db.productos.map(x=>x.id===id?p:x);}
+  else{db.productos.push(p);}
+  saveDB();closeModal('prod-modal');renderProductos();
+}
+
+function openSegModal(prodId){
+  const p=db.productos.find(x=>x.id===prodId);
+  document.getElementById('seg-prod-id').value=prodId;
+  document.getElementById('seg-modal-title').textContent='Registrar valor — '+p.nombre;
+  const {y,m}=currentYM();
+  // Poblar el select de mes aquí (antes del openModal)
+  const ms=document.getElementById('seg-mes');
+  ms.innerHTML=MESES.map((mn,i)=>`<option value="${i+1}"${i+1===m?' selected':''}>${mn}</option>`).join('');
+  document.getElementById('seg-anio').value=y;
+  document.getElementById('seg-aportacion').value=0;
+  document.getElementById('seg-valor').value='';
+  document.getElementById('seg-comentario').value='';
+  openModal('seg-modal');
+}
+function saveSeguimiento(){
+  const valorMercado=parseFloat(document.getElementById('seg-valor').value);
+  if(isNaN(valorMercado)||valorMercado<0){showToast('El valor de mercado debe ser un número positivo','warning');return;}
+  const seg={
+    id:uid(),
+    prodId:document.getElementById('seg-prod-id').value,
+    mes:parseInt(document.getElementById('seg-mes').value),
+    anio:parseInt(document.getElementById('seg-anio').value),
+    aportacion:parseFloat(document.getElementById('seg-aportacion').value)||0,
+    valorMercado,
+    comentario:document.getElementById('seg-comentario').value
+  };
+  // Sobreescribe si ya existe registro para ese mes/año/producto
+  db.seguimiento=db.seguimiento.filter(s=>!(s.prodId===seg.prodId&&s.mes===seg.mes&&s.anio===seg.anio));
+  db.seguimiento.push(seg);
+  saveDB();closeModal('seg-modal');renderProductos();
+}
+function delSeg(id){if(!confirm('¿Eliminar este registro?'))return;db.seguimiento=db.seguimiento.filter(s=>s.id!==id);saveDB();renderProductos();}
 
 // ============================================================
-// AGRUPACIONES, OBJETIVOS E INFORMES
+// AGRUPACIONES
 // ============================================================
 function renderAgrupaciones(){
-  if(!db.grupos.length){document.getElementById('grupos-list').innerHTML=`<div class="empty">No hay agrupaciones.</div>`;return;} const selMes=document.getElementById('month-select')?.value||ym2str(currentYM().y,currentYM().m); const[y,m]=selMes.split('-').map(Number); const movs=movsOfMonth(y,m);
-  document.getElementById('grupos-list').innerHTML=db.grupos.map(g=>{ let total=0;let detail=''; if(g.tipo==='categoria'){ g.items.forEach(cat=>{const s=movs.filter(mv=>mv.tipo==='gasto'&&mv.categoria===cat).reduce((sum,mv)=>sum+(parseFloat(mv.importe)||0),0);total+=s;detail+=`<div class="flex jcsb" style="font-size:12px;color:var(--text2);margin-bottom:4px"><span>${escHtml(cat)}</span><span>${fmt(s)}</span></div>`;}); } else{ g.items.forEach(pId=>{const p=db.productos.find(x=>x.id===pId);if(!p)return;const v=getValorProducto(p);total+=v;detail+=`<div class="flex jcsb" style="font-size:12px;color:var(--text2);margin-bottom:4px"><span>${escHtml(p.nombre)}</span><span>${fmt(v)}</span></div>`;}); } return `<div class="panel mb16"><div class="flex jcsb mb12"><div><div style="font-weight:600">${escHtml(g.nombre)}</div><div style="font-size:11px;color:var(--text3)">${g.tipo==='categoria'?'Agrupación de categorías':'Agrupación de productos'}</div></div><div class="flex gap8"><span style="font-size:18px;font-weight:700;color:var(--blue)">${fmt(total)}</span><button class="icon-btn" onclick="delGrupo('${g.id}')">🗑️</button></div></div><div class="separator"></div>${detail}</div>`; }).join('');
+  if(!db.grupos.length){document.getElementById('grupos-list').innerHTML=`<div class="empty">No hay agrupaciones.</div>`;return;}
+  const selMes=document.getElementById('month-select')?.value||ym2str(currentYM().y,currentYM().m);
+  const[y,m]=selMes.split('-').map(Number);
+  const movs=movsOfMonth(y,m);
+  document.getElementById('grupos-list').innerHTML=db.grupos.map(g=>{
+    let total=0;let detail='';
+    if(g.tipo==='categoria'){
+      g.items.forEach(cat=>{const s=movs.filter(mv=>mv.tipo==='gasto'&&mv.categoria===cat).reduce((sum,mv)=>sum+(parseFloat(mv.importe)||0),0);total+=s;detail+=`<div class="flex jcsb" style="font-size:12px;color:var(--text2);margin-bottom:4px"><span>${escHtml(cat)}</span><span>${fmt(s)}</span></div>`;});
+    }else{
+      g.items.forEach(pId=>{const p=db.productos.find(x=>x.id===pId);if(!p)return;const v=getValorProducto(p);total+=v;detail+=`<div class="flex jcsb" style="font-size:12px;color:var(--text2);margin-bottom:4px"><span>${escHtml(p.nombre)}</span><span>${fmt(v)}</span></div>`;});
+    }
+    return `<div class="panel mb16"><div class="flex jcsb mb12"><div><div style="font-weight:600">${escHtml(g.nombre)}</div><div style="font-size:11px;color:var(--text3)">${g.tipo==='categoria'?'Agrupación de categorías':'Agrupación de productos'}</div></div><div class="flex gap8"><span style="font-size:18px;font-weight:700;color:var(--blue)">${fmt(total)}</span><button class="icon-btn" onclick="delGrupo('${g.id}')">🗑️</button></div></div><div class="separator"></div>${detail}</div>`;
+  }).join('');
 }
 function openGrupoModal(){document.getElementById('grupo-nombre').value='';document.getElementById('grupo-tipo').value='categoria';renderGrupoItems();openModal('grupo-modal');}
-function renderGrupoItems(){ const tipo=document.getElementById('grupo-tipo').value; const items=tipo==='categoria'?db.categorias:db.productos; document.getElementById('grupo-items').innerHTML=items.map(it=>{ const id=tipo==='categoria'?it:it.id; const label=tipo==='categoria'?it:it.nombre; return `<label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer"><input type="checkbox" name="grupo-item" value="${escHtml(String(id))}" style="width:auto"> ${escHtml(label)}</label>`; }).join(''); }
-async function saveGrupo(){ const n=document.getElementById('grupo-nombre').value.trim();if(!n)return; const tipo=document.getElementById('grupo-tipo').value; const items=[...document.querySelectorAll('input[name="grupo-item"]:checked')].map(cb=>cb.value); db.grupos.push({id:uid(),nombre:n,tipo,items}); await saveDB();closeModal('grupo-modal');renderAgrupaciones(); }
-async function delGrupo(id){if(!confirm('¿Eliminar esta agrupación?'))return;db.grupos=db.grupos.filter(g=>g.id!==id);await saveDB();renderAgrupaciones();}
-function renderObjetivos(){ document.getElementById('obj-ahorro').value=db.objetivos.ahorro||0; document.getElementById('obj-inversion').value=db.objetivos.inversion||0; document.getElementById('obj-patrimonio').value=db.objetivos.patrimonio||0; document.getElementById('obj-emergencia').value=db.objetivos.emergencia||0; const {y,m}=currentYM(); const movs=movsOfMonth(y,m); const ing=movs.filter(mv=>mv.tipo==='ingreso').reduce((s,mv)=>s+(parseFloat(mv.importe)||0),0); const gas=movs.filter(mv=>mv.tipo==='gasto').reduce((s,mv)=>s+(parseFloat(mv.importe)||0),0); const ap=movs.filter(mv=>mv.tipo==='aportacion').reduce((s,mv)=>s+(parseFloat(mv.importe)||0),0); const rows=[{label:'Ahorro neto mensual',actual:ing-gas,obj:db.objetivos.ahorro},{label:'Aportaciones a inversión',actual:ap,obj:db.objetivos.inversion},{label:'Patrimonio total',actual:getPatrimonio(),obj:db.objetivos.patrimonio},{label:'Colchón de seguridad',actual:getColchonValor(),obj:db.objetivos.emergencia}]; document.getElementById('obj-progress').innerHTML=rows.map(r=>{ const pct=r.obj>0?Math.min(100,r.actual/r.obj*100):0; const cls=pct>=100?'var(--green)':pct>=50?'var(--amber)':'var(--red)'; return `<div class="mb16"><div class="flex jcsb"><span style="font-size:13px">${r.label}</span><span style="font-size:13px;color:var(--text2)">${fmt(r.actual)} / ${fmt(r.obj)}</span></div><div class="progress-bar mt16"><div class="fill" style="width:${pct.toFixed(1)}%;background:${cls}"></div></div></div>`; }).join(''); }
-async function saveObjetivos(){ db.objetivos={ ahorro:parseFloat(document.getElementById('obj-ahorro').value)||0, inversion:parseFloat(document.getElementById('obj-inversion').value)||0, patrimonio:parseFloat(document.getElementById('obj-patrimonio').value)||0, emergencia:parseFloat(document.getElementById('obj-emergencia').value)||0 }; await saveDB();showToast('Objetivos guardados ✓','info');renderObjetivos(); }
-function renderInformes(){ const months=getMonths(6); const infData={ ingresos:months.map(({y,m})=>movsOfMonth(y,m).filter(mv=>mv.tipo==='ingreso').reduce((s,mv)=>s+(parseFloat(mv.importe)||0),0)), gastos:months.map(({y,m})=>movsOfMonth(y,m).filter(mv=>mv.tipo==='gasto').reduce((s,mv)=>s+(parseFloat(mv.importe)||0),0)), ahorro:months.map(({y,m})=>{const mv=movsOfMonth(y,m);const i=mv.filter(x=>x.tipo==='ingreso').reduce((s,x)=>s+(parseFloat(x.importe)||0),0);const g=mv.filter(x=>x.tipo==='gasto').reduce((s,x)=>s+(parseFloat(x.importe)||0),0);return Math.max(0,i-g);}) }; buildChart('ch-inf-men',{type:'bar',data:{labels:months.map(m=>m.label.substring(0,3)+' '+m.y.toString().slice(2)),datasets:[{label:'Ingresos',data:infData.ingresos,backgroundColor:'rgba(46,204,113,0.8)',borderRadius:4},{label:'Gastos',data:infData.gastos,backgroundColor:'rgba(231,76,60,0.8)',borderRadius:4},{label:'Ahorro neto',data:infData.ahorro,backgroundColor:'rgba(74,158,255,0.8)',borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#a0a0c0',font:{size:12}}}},scales:{x:{grid:{display:false},ticks:{color:'#a0a0c0'}},y:{grid:{color:'rgba(255,255,255,0.05)'},ticks:{color:'#a0a0c0',callback:v=>v+'€'}}}}}); const curY=new Date().getFullYear(); const anualMovs=db.movimientos.filter(mv=>new Date(mv.fecha).getFullYear()===curY); const aI=anualMovs.filter(m=>m.tipo==='ingreso').reduce((s,m)=>s+(parseFloat(m.importe)||0),0); const aG=anualMovs.filter(m=>m.tipo==='gasto').reduce((s,m)=>s+(parseFloat(m.importe)||0),0); const aAp=anualMovs.filter(m=>m.tipo==='aportacion').reduce((s,m)=>s+(parseFloat(m.importe)||0),0); document.getElementById('inf-anual-content').innerHTML=`<div class="cards"><div class="card green"><div class="label">Ingresos ${curY}</div><div class="value">${fmt(aI)}</div></div><div class="card red"><div class="label">Gastos ${curY}</div><div class="value">${fmt(aG)}</div></div><div class="card blue"><div class="label">Ahorro neto ${curY}</div><div class="value">${fmt(aI-aG)}</div></div><div class="card purple"><div class="label">Aportaciones ${curY}</div><div class="value">${fmt(aAp)}</div></div></div>`; const catMap={}; db.movimientos.filter(m=>m.tipo==='gasto').forEach(m=>{catMap[m.categoria]=(catMap[m.categoria]||0)+(parseFloat(m.importe)||0)}); const catKeys=Object.keys(catMap).sort((a,b)=>catMap[b]-catMap[a]); buildChart('ch-inf-cat',{type:'bar',data:{labels:catKeys.length?catKeys:['Sin gastos'],datasets:[{data:catKeys.length?catKeys.map(k=>catMap[k]):[0],backgroundColor:catKeys.length?catKeys.map(k=>db.catColores[k]||'#888'):['#2a2a4a'],borderRadius:5}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{color:'rgba(255,255,255,0.05)'},ticks:{callback:v=>v+'€'}},y:{grid:{display:false}}}}}); document.getElementById('inf-prod-content').innerHTML=`<table><thead><tr><th>Producto</th><th>Tipo</th><th>Capital</th><th>Valor actual</th><th>Rent. €</th><th>Rent. %</th></tr></thead><tbody>${db.productos.map(p=>{const ap=getCapitalTotalProducto(p);const v=getValorProducto(p);const r=v-ap;const rp=ap>0?(r/ap*100):0;return `<tr><td>${escHtml(p.nombre)}</td><td>${tipoLabels[p.tipo]||p.tipo}</td><td>${fmt(ap)}</td><td>${fmt(v)}</td><td class="${r>=0?'text-green':'text-red'}">${r>=0?'+':''}${fmt(r)}</td><td class="${rp>=0?'text-green':'text-red'}">${rp>=0?'+':''}${fmtPct(rp)}</td></tr>`}).join('')}</tbody></table>`; }
-function switchTab(id,el){ document.querySelectorAll('.inf-tab').forEach(t=>t.style.display='none'); document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active')); document.getElementById(id).style.display='';el.classList.add('active'); setTimeout(renderInformes,50); }
+function renderGrupoItems(){
+  const tipo=document.getElementById('grupo-tipo').value;
+  const items=tipo==='categoria'?db.categorias:db.productos;
+  document.getElementById('grupo-items').innerHTML=items.map(it=>{
+    const id=tipo==='categoria'?it:it.id;
+    const label=tipo==='categoria'?it:it.nombre;
+    return `<label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer"><input type="checkbox" name="grupo-item" value="${escHtml(String(id))}" style="width:auto"> ${escHtml(label)}</label>`;
+  }).join('');
+}
+function saveGrupo(){
+  const n=document.getElementById('grupo-nombre').value.trim();if(!n)return;
+  const tipo=document.getElementById('grupo-tipo').value;
+  const items=[...document.querySelectorAll('input[name="grupo-item"]:checked')].map(cb=>cb.value);
+  db.grupos.push({id:uid(),nombre:n,tipo,items});
+  saveDB();closeModal('grupo-modal');renderAgrupaciones();
+}
+function delGrupo(id){if(!confirm('¿Eliminar esta agrupación?'))return;db.grupos=db.grupos.filter(g=>g.id!==id);saveDB();renderAgrupaciones();}
 
 // ============================================================
-// CONFIG Y DATOS
+// OBJETIVOS
 // ============================================================
-function renderConfig(){ document.getElementById('alerta-ahorro').checked=db.config.alertas.ahorro||false; document.getElementById('alerta-gasto').checked=db.config.alertas.gasto||false; document.getElementById('alerta-inversion').checked=db.config.alertas.inversion||false; document.getElementById('alerta-colchon').value=db.config.alertas.colchon||3000; document.getElementById('config-limits').innerHTML=db.categorias.map(c=>`<div class="form-row cols2 mb16"><label>${escHtml(c)} — límite (€/mes)</label><input type="number" id="lim-${escHtml(c)}" value="${db.config.limites[c]||''}" placeholder="Sin límite" min="0"></div>`).join(''); }
-async function saveConfig(){ db.config.alertas={ ahorro:document.getElementById('alerta-ahorro').checked, gasto:document.getElementById('alerta-gasto').checked, inversion:document.getElementById('alerta-inversion').checked, colchon:parseFloat(document.getElementById('alerta-colchon').value)||0 }; db.config.limites={}; db.categorias.forEach(c=>{const el=document.getElementById('lim-'+c);if(el){const v=parseFloat(el.value);if(v>0)db.config.limites[c]=v;}}); await saveDB();showToast('Configuración guardada ✓','info'); }
-async function renderDatos(){ const est = await estimateStorage(); const usedKb=Math.round(est.usage/1024); const quotaMb=est.quota?Math.round(est.quota/1024/1024):0; const pct=est.quota?Math.min(100,(est.usage/est.quota)*100):0; document.getElementById('storage-used').textContent=quotaMb?`${usedKb} KB usados de ~${quotaMb} MB disponibles`:'IndexedDB activo'; document.getElementById('storage-pct').textContent=quotaMb?pct.toFixed(1)+'%':''; const fill=document.getElementById('storage-fill'); fill.style.width=(quotaMb?pct:5)+'%'; fill.style.background=pct>80?'#e74c3c':pct>60?'#f39c12':'#2ecc71'; }
-function exportJSON(){ const str = JSON.stringify(db, null, 2); showExportModal('Copia de seguridad JSON', str, 'json'); }
-function exportCSV(){ const rows=[['fecha','concepto','tipo','importe','categoria','subcategoria','metodo','comentario'], ...db.movimientos.map(m=>[m.fecha,m.concepto,m.tipo,m.importe,m.categoria||'',m.subcat||'',m.metodo||'',m.comentario||''])]; const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n'); showExportModal('Movimientos CSV', csv, 'csv'); }
-function showExportModal(title, content, type) { const existing = document.getElementById('export-modal'); if (existing) existing.remove(); window._exportContent = content; const mime = type === 'json' ? 'application/json' : 'text/csv;charset=utf-8'; const filename = `misfinanzas_${type === 'json' ? 'backup' : 'movimientos'}_${new Date().toISOString().split('T')[0]}.${type}`; const modal = document.createElement('div'); modal.id = 'export-modal'; modal.className = 'modal-bg open'; modal.innerHTML = `<div class="modal" style="width:min(700px,95vw)"><div class="flex jcsb mb16"><h3 style="margin:0">${title}</h3></div><p style="font-size:12px;color:var(--text3);margin-bottom:14px">Descarga el archivo o copia el contenido como respaldo manual.</p><textarea id="export-content" style="width:100%;height:300px;font-size:11px;font-family:monospace;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:12px;resize:none" readonly></textarea><div id="copy-ok" style="display:none;color:var(--green);font-size:13px;margin-top:8px">✓ Copiado al portapapeles</div><div class="flex gap8 mt16"><button class="btn btn-primary" onclick="copyExport()">📋 Copiar</button><button class="btn btn-ghost" onclick="tryDownload('${filename}','${mime}')">⬇️ Descargar</button><button class="btn btn-ghost" onclick="document.getElementById('export-modal').remove()">Cerrar</button></div></div>`; document.body.appendChild(modal); document.getElementById('export-content').value = content; modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); }); }
-function copyExport() { const ta = document.getElementById('export-content'); navigator.clipboard.writeText(ta.value).then(() => { const el = document.getElementById('copy-ok'); if(el){ el.style.display='block'; setTimeout(()=>el.style.display='none', 3000); } }).catch(() => { ta.select(); document.execCommand('copy'); const el = document.getElementById('copy-ok'); if(el){ el.style.display='block'; setTimeout(()=>el.style.display='none', 3000); } }); }
-function tryDownload(filename, mime) { try { const content = window._exportContent || ''; const blob = new Blob([content], { type: mime }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000); } catch(e) { alert('La descarga no es posible en este entorno. Usa Copiar.'); } }
-async function importJSON(input){ const f=input.files[0];if(!f)return; const r=new FileReader(); r.onload=async e=>{ try{ const parsed=JSON.parse(e.target.result); if(typeof parsed!=='object'||Array.isArray(parsed)) throw new Error('Formato JSON no válido'); const validKeys=['movimientos','productos','seguimiento','categorias','catColores','metodos','grupos','objetivos','config','meta']; const hasValidKey=validKeys.some(k=>parsed[k]!==undefined); if(!hasValidKey) throw new Error('El archivo no parece ser una copia de seguridad de MisFinanzas'); if(!confirm('¿Restaurar datos? Se reemplazarán todos los datos actuales.')) return; db=mergeKnownFields(createDefaultDB(), parsed); await saveDB(); showToast('Datos restaurados correctamente ✓','info'); initRender(); }catch(err){showToast('Error al importar: '+err.message,'danger');} }; r.readAsText(f); input.value=''; }
-async function importCSV(input){ const f=input.files[0];if(!f)return; const r=new FileReader(); r.onload=async e=>{ const lines=e.target.result.split('\n').filter(l=>l.trim()); if(!lines.length){showToast('El CSV está vacío','warning');return;} const headers=lines[0].split(',').map(h=>h.replace(/^"|"$/g,'').trim().toLowerCase()); const tiposValidos=new Set(['ingreso','gasto','ahorro','aportacion']); let added=0, skipped=0; for(let i=1;i<lines.length;i++){ const cols=lines[i].split(',').map(v=>v.replace(/^"|"$/g,'').trim()); const obj={};headers.forEach((h,idx)=>{obj[h]=cols[idx]||'';}); const importe=parseFloat(obj.importe); const tipo=(obj.tipo||'').toLowerCase(); if(!obj.fecha||!obj.concepto||isNaN(importe)){skipped++;continue;} db.movimientos.push({ id:uid(), fecha:obj.fecha, concepto:obj.concepto, tipo:tiposValidos.has(tipo)?tipo:'gasto', importe:Math.abs(importe), categoria:obj.categoria||'Otros', subcat:obj.subcategoria||'', metodo:obj.metodo||'', comentario:obj.comentario||'' }); added++; } await saveDB(); showToast(`Importados ${added} movimientos. Omitidos ${skipped} (datos inválidos).`,'info'); renderDatos(); input.value=''; }; r.readAsText(f,'UTF-8'); }
+function renderObjetivos(){
+  document.getElementById('obj-ahorro').value=db.objetivos.ahorro||0;
+  document.getElementById('obj-inversion').value=db.objetivos.inversion||0;
+  document.getElementById('obj-patrimonio').value=db.objetivos.patrimonio||0;
+  document.getElementById('obj-emergencia').value=db.objetivos.emergencia||0;
+  const {y,m}=currentYM();
+  const movs=movsOfMonth(y,m);
+  const ing=movs.filter(mv=>mv.tipo==='ingreso').reduce((s,mv)=>s+(parseFloat(mv.importe)||0),0);
+  const gas=movs.filter(mv=>mv.tipo==='gasto').reduce((s,mv)=>s+(parseFloat(mv.importe)||0),0);
+  const ap=movs.filter(mv=>mv.tipo==='aportacion').reduce((s,mv)=>s+(parseFloat(mv.importe)||0),0);
+  const rows=[
+    {label:'Ahorro neto mensual',actual:ing-gas,obj:db.objetivos.ahorro},
+    {label:'Aportaciones a inversión',actual:ap,obj:db.objetivos.inversion},
+    {label:'Patrimonio total',actual:getPatrimonio(),obj:db.objetivos.patrimonio},
+    {label:'Colchón de seguridad',actual:getColchonValor(),obj:db.objetivos.emergencia}
+  ];
+  document.getElementById('obj-progress').innerHTML=rows.map(r=>{
+    const pct=r.obj>0?Math.min(100,r.actual/r.obj*100):0;
+    const cls=pct>=100?'var(--green)':pct>=50?'var(--amber)':'var(--red)';
+    return `<div class="mb16"><div class="flex jcsb"><span style="font-size:13px">${r.label}</span><span style="font-size:13px;color:var(--text2)">${fmt(r.actual)} / ${fmt(r.obj)}</span></div><div class="progress-bar mt16"><div class="fill" style="width:${pct.toFixed(1)}%;background:${cls}"></div></div></div>`;
+  }).join('');
+}
+function saveObjetivos(){
+  db.objetivos={
+    ahorro:parseFloat(document.getElementById('obj-ahorro').value)||0,
+    inversion:parseFloat(document.getElementById('obj-inversion').value)||0,
+    patrimonio:parseFloat(document.getElementById('obj-patrimonio').value)||0,
+    emergencia:parseFloat(document.getElementById('obj-emergencia').value)||0
+  };
+  saveDB();showToast('Objetivos guardados ✓','info');renderObjetivos();
+}
+
+// ============================================================
+// INFORMES
+// ============================================================
+function renderInformes(){
+  const months=getMonths(6);
+  const infData={
+    ingresos:months.map(({y,m})=>movsOfMonth(y,m).filter(mv=>mv.tipo==='ingreso').reduce((s,mv)=>s+(parseFloat(mv.importe)||0),0)),
+    gastos:months.map(({y,m})=>movsOfMonth(y,m).filter(mv=>mv.tipo==='gasto').reduce((s,mv)=>s+(parseFloat(mv.importe)||0),0)),
+    ahorro:months.map(({y,m})=>{const mv=movsOfMonth(y,m);const i=mv.filter(x=>x.tipo==='ingreso').reduce((s,x)=>s+(parseFloat(x.importe)||0),0);const g=mv.filter(x=>x.tipo==='gasto').reduce((s,x)=>s+(parseFloat(x.importe)||0),0);return Math.max(0,i-g);})
+  };
+  buildChart('ch-inf-men',{type:'bar',data:{labels:months.map(m=>m.label.substring(0,3)+' '+m.y.toString().slice(2)),datasets:[{label:'Ingresos',data:infData.ingresos,backgroundColor:'rgba(46,204,113,0.8)',borderRadius:4},{label:'Gastos',data:infData.gastos,backgroundColor:'rgba(231,76,60,0.8)',borderRadius:4},{label:'Ahorro neto',data:infData.ahorro,backgroundColor:'rgba(74,158,255,0.8)',borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#a0a0c0',font:{size:12}}}},scales:{x:{grid:{display:false},ticks:{color:'#a0a0c0'}},y:{grid:{color:'rgba(255,255,255,0.05)'},ticks:{color:'#a0a0c0',callback:v=>v+'€'}}}}});
+
+  const curY=new Date().getFullYear();
+  const anualMovs=db.movimientos.filter(mv=>new Date(mv.fecha).getFullYear()===curY);
+  const aI=anualMovs.filter(m=>m.tipo==='ingreso').reduce((s,m)=>s+(parseFloat(m.importe)||0),0);
+  const aG=anualMovs.filter(m=>m.tipo==='gasto').reduce((s,m)=>s+(parseFloat(m.importe)||0),0);
+  const aAp=anualMovs.filter(m=>m.tipo==='aportacion').reduce((s,m)=>s+(parseFloat(m.importe)||0),0);
+  document.getElementById('inf-anual-content').innerHTML=`<div class="cards"><div class="card green"><div class="label">Ingresos ${curY}</div><div class="value">${fmt(aI)}</div></div><div class="card red"><div class="label">Gastos ${curY}</div><div class="value">${fmt(aG)}</div></div><div class="card blue"><div class="label">Ahorro neto ${curY}</div><div class="value">${fmt(aI-aG)}</div></div><div class="card purple"><div class="label">Aportaciones ${curY}</div><div class="value">${fmt(aAp)}</div></div></div>`;
+
+  // Gastos acumulados por categoría
+  const catMap={};
+  db.movimientos.filter(m=>m.tipo==='gasto').forEach(m=>{catMap[m.categoria]=(catMap[m.categoria]||0)+(parseFloat(m.importe)||0)});
+  const catKeys=Object.keys(catMap).sort((a,b)=>catMap[b]-catMap[a]);
+  if(catKeys.length){
+    buildChart('ch-inf-cat',{type:'bar',data:{labels:catKeys,datasets:[{data:catKeys.map(k=>catMap[k]),backgroundColor:catKeys.map(k=>db.catColores[k]||'#888'),borderRadius:5}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{color:'rgba(255,255,255,0.05)'},ticks:{callback:v=>v+'€'}},y:{grid:{display:false}}}}});
+  }
+
+  // Por producto — todos, separando tipo
+  document.getElementById('inf-prod-content').innerHTML=`<table><thead><tr><th>Producto</th><th>Tipo</th><th>Capital</th><th>Valor actual</th><th>Rent. €</th><th>Rent. %</th></tr></thead><tbody>${db.productos.map(p=>{const ap=getCapitalTotalProducto(p);const v=getValorProducto(p);const r=v-ap;const rp=ap>0?(r/ap*100):0;return `<tr><td>${escHtml(p.nombre)}</td><td>${tipoLabels[p.tipo]||p.tipo}</td><td>${fmt(ap)}</td><td>${fmt(v)}</td><td class="${r>=0?'text-green':'text-red'}">${r>=0?'+':''}${fmt(r)}</td><td class="${rp>=0?'text-green':'text-red'}">${rp>=0?'+':''}${fmtPct(rp)}</td></tr>`}).join('')}</tbody></table>`;
+}
+function switchTab(id,el){
+  document.querySelectorAll('.inf-tab').forEach(t=>t.style.display='none');
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById(id).style.display='';el.classList.add('active');
+  setTimeout(renderInformes,50);
+}
+
+// ============================================================
+// CONFIG
+// ============================================================
+function renderConfig(){
+  document.getElementById('alerta-ahorro').checked=db.config.alertas.ahorro||false;
+  document.getElementById('alerta-gasto').checked=db.config.alertas.gasto||false;
+  document.getElementById('alerta-inversion').checked=db.config.alertas.inversion||false;
+  document.getElementById('alerta-colchon').value=db.config.alertas.colchon||3000;
+  document.getElementById('config-limits').innerHTML=db.categorias.map(c=>`<div class="form-row cols2 mb16"><label>${escHtml(c)} — límite (€/mes)</label><input type="number" id="lim-${escHtml(c)}" value="${db.config.limites[c]||''}" placeholder="Sin límite" min="0"></div>`).join('');
+}
+function saveConfig(){
+  db.config.alertas={
+    ahorro:document.getElementById('alerta-ahorro').checked,
+    gasto:document.getElementById('alerta-gasto').checked,
+    inversion:document.getElementById('alerta-inversion').checked,
+    colchon:parseFloat(document.getElementById('alerta-colchon').value)||0
+  };
+  db.config.limites={};
+  db.categorias.forEach(c=>{const el=document.getElementById('lim-'+c);if(el){const v=parseFloat(el.value);if(v>0)db.config.limites[c]=v;}});
+  saveDB();showToast('Configuración guardada ✓','info');
+}
+
+// ============================================================
+// DATOS / IMPORTACIÓN / EXPORTACIÓN
+// ============================================================
+async function renderDatos(){
+  const serialized = JSON.stringify(db);
+  const kb = Math.round(serialized.length / 1024);
+  let txt = `${kb} KB usados en la base local`;
+  let pct = 0;
+  if (navigator.storage && navigator.storage.estimate) {
+    try {
+      const estimate = await navigator.storage.estimate();
+      const usedKb = Math.round((estimate.usage || serialized.length) / 1024);
+      const quotaKb = Math.round((estimate.quota || 0) / 1024);
+      pct = estimate.quota ? Math.min(100, ((estimate.usage || 0) / estimate.quota) * 100) : 0;
+      txt = quotaKb ? `${usedKb} KB usados de ${(quotaKb/1024).toFixed(1)} MB disponibles` : `${usedKb} KB usados`;
+    } catch(e) {
+      console.warn('No se pudo calcular almacenamiento:', e);
+    }
+  }
+  document.getElementById('storage-used').textContent = txt;
+  document.getElementById('storage-pct').textContent = pct ? pct.toFixed(1)+'%' : 'IndexedDB';
+  const fill=document.getElementById('storage-fill');
+  fill.style.width=pct ? pct+'%' : '8%';
+  fill.style.background=pct>80?'#e74c3c':pct>60?'#f39c12':'#2ecc71';
+}
+function exportJSON(){
+  const str = JSON.stringify(db, null, 2);
+  showExportModal('Copia de seguridad JSON', str, 'json');
+}
+function exportCSV(){
+  const rows=[['fecha','concepto','tipo','importe','categoria','subcategoria','metodo','comentario'],
+    ...db.movimientos.map(m=>[m.fecha,m.concepto,m.tipo,m.importe,m.categoria||'',m.subcat||'',m.metodo||'',m.comentario||''])];
+  const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  showExportModal('Movimientos CSV', csv, 'csv');
+}
+function showExportModal(title, content, type) {
+  const existing = document.getElementById('export-modal');
+  if (existing) existing.remove();
+
+  // Guardar contenido en variable accesible por los botones
+  window._exportContent = content;
+  window._exportType = type;
+  window._exportTitle = title;
+
+  const mime = type === 'json' ? 'application/json' : 'text/csv;charset=utf-8';
+  const filename = `misfinanzas_${type === 'json' ? 'backup' : 'movimientos'}_${new Date().toISOString().split('T')[0]}.${type}`;
+
+  const modal = document.createElement('div');
+  modal.id = 'export-modal';
+  modal.className = 'modal-bg open';
+  modal.innerHTML = `
+    <div class="modal" style="width:min(700px,95vw)">
+      <div class="flex jcsb mb16">
+        <h3 style="margin:0">${title}</h3>
+      </div>
+      <p style="font-size:12px;color:var(--text3);margin-bottom:14px">
+        Descarga o copia este contenido y guárdalo en un lugar privado. Es tu copia de seguridad.
+      </p>
+      <textarea id="export-content" style="width:100%;height:300px;font-size:11px;font-family:monospace;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:12px;resize:none" readonly></textarea>
+      <div id="copy-ok" style="display:none;color:var(--green);font-size:13px;margin-top:8px">✓ Copiat al porta-retalls</div>
+      <div class="flex gap8 mt16">
+        <button class="btn btn-primary" onclick="copyExport()">📋 Copiar al portapapeles</button>
+        <button class="btn btn-ghost" onclick="tryDownload('${filename}','${mime}')">⬇️ Probar descarga</button>
+        <button class="btn btn-ghost" onclick="document.getElementById('export-modal').remove()">Cerrar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  // Asignar contenido directamente (sin escaping) al textarea
+  document.getElementById('export-content').value = content;
+
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+}
+
+function copyExport() {
+  const ta = document.getElementById('export-content');
+  navigator.clipboard.writeText(ta.value).then(() => {
+    const el = document.getElementById('copy-ok');
+          if(el){ el.textContent='✓ Copiado al portapapeles'; el.style.display='block'; setTimeout(()=>el.style.display='none', 3000); }
+  }).catch(() => {
+    ta.select();
+    document.execCommand('copy');
+    const el = document.getElementById('copy-ok');
+    if(el){ el.style.display='block'; setTimeout(()=>el.style.display='none', 3000); }
+  });
+}
+
+function tryDownload(filename, mime) {
+  try {
+    const content = window._exportContent || '';
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+  } catch(e) {
+    alert('La descarga no es posible en este entorno. Usa "Copiar al portapapeles".');
+  }
+}
+function importJSON(input){
+  const f=input.files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=e=>{
+    try{
+      const parsed=JSON.parse(e.target.result);
+      // Validación básica de esquema
+      if(typeof parsed!=='object'||Array.isArray(parsed)) throw new Error('Formato JSON no válido');
+      const validKeys=['movimientos','productos','seguimiento','gastosPrevistos','categorias','catColores','metodos','grupos','objetivos','config'];
+      const hasValidKey=validKeys.some(k=>parsed[k]!==undefined);
+      if(!hasValidKey) throw new Error('El archivo no parece ser una copia de seguridad de MisFinanzas');
+      if(!confirm('¿Restaurar datos? Se reemplazarán todos los datos actuales.')) return;
+      validKeys.forEach(k=>{if(parsed[k]!==undefined) db[k]=parsed[k];});
+      saveDB();showToast('Datos restaurados correctamente ✓','info');renderDashboard();renderDatos();
+    }catch(err){showToast('Error al importar: '+err.message,'danger');}
+  };
+  r.readAsText(f);
+  input.value=''; // reset para poder reimportar el mismo archivo
+}
+function importCSV(input){
+  const f=input.files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=e=>{
+    const lines=e.target.result.split('\n').filter(l=>l.trim());
+    if(!lines.length){showToast('El CSV está vacío','warning');return;}
+    const headers=lines[0].split(',').map(h=>h.replace(/^"|"$/g,'').trim().toLowerCase());
+    const tiposValidos=new Set(['ingreso','gasto','ahorro','aportacion']);
+    let added=0, skipped=0;
+    for(let i=1;i<lines.length;i++){
+      const cols=lines[i].split(',').map(v=>v.replace(/^"|"$/g,'').trim());
+      const obj={};headers.forEach((h,idx)=>{obj[h]=cols[idx]||'';});
+      const importe=parseFloat(obj.importe);
+      const tipo=(obj.tipo||'').toLowerCase();
+      if(!obj.fecha||!obj.concepto||isNaN(importe)){skipped++;continue;}
+      db.movimientos.push({
+        id:uid(),
+        fecha:obj.fecha,
+        concepto:obj.concepto,
+        tipo:tiposValidos.has(tipo)?tipo:'gasto',
+        importe:Math.abs(importe), // siempre positivo
+        categoria:obj.categoria||'Otros',
+        subcat:obj.subcategoria||'',
+        metodo:obj.metodo||'',
+        comentario:obj.comentario||''
+      });
+      added++;
+    }
+    saveDB();showToast(`Importados ${added} movimientos. Omitidos ${skipped} (datos inválidos).`,'info');renderDatos();
+    input.value='';
+  };
+  r.readAsText(f,'UTF-8');
+}
 
 // ============================================================
 // INIT
 // ============================================================
-window.addEventListener('click',e=>{ document.querySelectorAll('.modal-bg').forEach(m=>{if(e.target===m)m.classList.remove('open');}); });
-async function initRender(){ populateMonthSelects(); populateCatSelect(); populateMetodoSelect(); renderDashboard(); }
-(async function initApp(){ await loadDB(); await initRender(); })();
+window.addEventListener('click',e=>{
+  document.querySelectorAll('.modal-bg').forEach(m=>{if(e.target===m)m.classList.remove('open');});
+});
+// ============================================================
+// DATOS FICTICIOS DE DEMOSTRACIÓN
+// ============================================================
+function cargarDatosFicticios() {
+  // Solo se cargan la primera vez. Si ya hay datos, no se sobrescriben.
+  if (db.productos.length > 0 || db.movimientos.length > 0 || db.seguimiento.length > 0) return;
+
+  const hoy = new Date();
+  const anio = hoy.getFullYear();
+  const mesActual = hoy.getMonth() + 1;
+  const mesAnterior = mesActual === 1 ? 12 : mesActual - 1;
+  const anioAnterior = mesActual === 1 ? anio - 1 : anio;
+
+  db.productos = [
+    { id: 'demo_colchon', nombre: 'Cuenta de emergencia demo', tipo: 'colchon', entidad: 'Banco demo', isin: '', riesgo: 'muy_bajo', capitalInicial: 3500, comentario: 'Dato ficticio para probar la app.' },
+    { id: 'demo_monetario', nombre: 'Fondo monetario demo', tipo: 'ahorro_conservador', entidad: 'Gestora demo', isin: '', riesgo: 'bajo', capitalInicial: 2500, comentario: 'Dato ficticio para probar la app.' },
+    { id: 'demo_global', nombre: 'Fondo global indexado demo', tipo: 'fondo_indexado', entidad: 'Plataforma demo', isin: '', riesgo: 'medio', capitalInicial: 1200, comentario: 'Dato ficticio para probar la app.' },
+    { id: 'demo_etf', nombre: 'ETF diversificado demo', tipo: 'etf', entidad: 'Broker demo', isin: '', riesgo: 'medio', capitalInicial: 800, comentario: 'Dato ficticio para probar la app.' }
+  ];
+
+  db.movimientos = [
+    { id: uid(), fecha: `${anioAnterior}-${String(mesAnterior).padStart(2,'0')}-01`, tipo: 'ingreso', concepto: 'Ingreso mensual demo', importe: 1800, categoria: 'Otros', subcat: '', metodo: 'Cuenta corriente', comentario: 'Dato ficticio' },
+    { id: uid(), fecha: `${anioAnterior}-${String(mesAnterior).padStart(2,'0')}-03`, tipo: 'gasto', concepto: 'Alquiler demo', importe: 650, categoria: 'Vivienda', subcat: 'Alquiler', metodo: 'Cuenta corriente', comentario: 'Dato ficticio' },
+    { id: uid(), fecha: `${anioAnterior}-${String(mesAnterior).padStart(2,'0')}-08`, tipo: 'gasto', concepto: 'Supermercado demo', importe: 260, categoria: 'Alimentación', subcat: 'Compra mensual', metodo: 'Tarjeta crédito', comentario: 'Dato ficticio' },
+    { id: uid(), fecha: `${anioAnterior}-${String(mesAnterior).padStart(2,'0')}-15`, tipo: 'aportacion', concepto: 'Aportación inversión demo', importe: 150, categoria: 'Otros', subcat: '', metodo: 'Cuenta corriente', comentario: 'No computa como gasto real' },
+    { id: uid(), fecha: `${anio}-${String(mesActual).padStart(2,'0')}-01`, tipo: 'ingreso', concepto: 'Ingreso mensual demo', importe: 1850, categoria: 'Otros', subcat: '', metodo: 'Cuenta corriente', comentario: 'Dato ficticio' },
+    { id: uid(), fecha: `${anio}-${String(mesActual).padStart(2,'0')}-04`, tipo: 'gasto', concepto: 'Vivienda demo', importe: 650, categoria: 'Vivienda', subcat: 'Alquiler', metodo: 'Cuenta corriente', comentario: 'Dato ficticio' },
+    { id: uid(), fecha: `${anio}-${String(mesActual).padStart(2,'0')}-10`, tipo: 'gasto', concepto: 'Transporte demo', importe: 85, categoria: 'Transporte', subcat: '', metodo: 'Tarjeta crédito', comentario: 'Dato ficticio' },
+    { id: uid(), fecha: `${anio}-${String(mesActual).padStart(2,'0')}-18`, tipo: 'aportacion', concepto: 'Aportación inversión demo', importe: 200, categoria: 'Otros', subcat: '', metodo: 'Cuenta corriente', comentario: 'No computa como gasto real' }
+  ];
+
+  db.seguimiento = [
+    { id: uid(), prodId: 'demo_colchon', mes: mesAnterior, anio: anioAnterior, aportacion: 0, valorMercado: 3500, comentario: 'Dato ficticio' },
+    { id: uid(), prodId: 'demo_colchon', mes: mesActual, anio: anio, aportacion: 100, valorMercado: 3600, comentario: 'Dato ficticio' },
+    { id: uid(), prodId: 'demo_monetario', mes: mesAnterior, anio: anioAnterior, aportacion: 0, valorMercado: 2505, comentario: 'Dato ficticio' },
+    { id: uid(), prodId: 'demo_monetario', mes: mesActual, anio: anio, aportacion: 100, valorMercado: 2610, comentario: 'Dato ficticio' },
+    { id: uid(), prodId: 'demo_global', mes: mesAnterior, anio: anioAnterior, aportacion: 150, valorMercado: 1340, comentario: 'Dato ficticio' },
+    { id: uid(), prodId: 'demo_global', mes: mesActual, anio: anio, aportacion: 150, valorMercado: 1505, comentario: 'Dato ficticio' },
+    { id: uid(), prodId: 'demo_etf', mes: mesAnterior, anio: anioAnterior, aportacion: 0, valorMercado: 790, comentario: 'Dato ficticio' },
+    { id: uid(), prodId: 'demo_etf', mes: mesActual, anio: anio, aportacion: 50, valorMercado: 865, comentario: 'Dato ficticio' }
+  ];
+
+  db.grupos = [
+    { id: uid(), nombre: 'Gastos fijos demo', tipo: 'categoria', items: ['Vivienda','Suscripciones'] },
+    { id: uid(), nombre: 'Inversión largo plazo demo', tipo: 'producto', items: ['demo_global','demo_etf'] }
+  ];
+
+  db.objetivos = { ahorro: 400, inversion: 200, patrimonio: 12000, emergencia: 5000 };
+  saveDB();
+}
+
+async function initApp() {
+  await loadDB();
+  populateMonthSelects();
+  cargarDatosFicticios();
+  renderDashboard();
+}
+
+initApp();
+
 </script>
 </body>
 </html>
