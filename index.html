@@ -374,7 +374,7 @@ label{display:block;font-size:11px;color:var(--text3);margin-bottom:5px;text-tra
     <h2 style="margin:0">Traspasos internos</h2>
     <button class="btn btn-primary btn-sm" onclick="openTraspasoModal()">+ Nuevo traspaso</button>
   </div>
-  <div class="alert alert-info mb16">ℹ️ Usa esta sección para mover dinero entre productos: por ejemplo, del colchón de seguridad a un fondo indexado. No cuenta como gasto, ingreso ni pérdida; solo cambia el dinero de sitio.</div>
+  <div class="alert alert-info mb16">ℹ️ Usa esta sección para mover dinero entre cuentas o productos propios: BBVA ↔ ING, MyInvestor ↔ BBVA, colchón → inversión, etc. No cuenta como gasto, ingreso ni pérdida; solo cambia el dinero de sitio.</div>
   <div id="traspasos-summary" class="cards mb24"></div>
   <div class="panel"><div id="traspasos-table-wrap"></div></div>
 </section>
@@ -478,7 +478,7 @@ label{display:block;font-size:11px;color:var(--text3);margin-bottom:5px;text-tra
   <div class="alert alert-info mb16">ℹ️ Esta checklist te ayuda a revisar la app cada mes sin mezclar gastos, aportaciones y traspasos.</div>
   <div class="cards" id="revision-cards"></div>
   <div class="panel mb24"><h3>Checklist del mes</h3><div id="revision-checklist" class="checklist"></div><button class="btn btn-primary mt16" onclick="saveRevisionChecklist()">Guardar revisión</button></div>
-  <div class="panel"><h3>Regla contable rápida</h3><p class="help-note"><strong>Gasto</strong> = dinero que sale de tu patrimonio. <strong>Aportación</strong> = dinero que pasa de efectivo a inversión. <strong>Traspaso interno</strong> = dinero que cambia de un producto a otro. <strong>Rentabilidad</strong> = cambio de valor del producto, no movimiento de dinero.</p></div>
+  <div class="panel"><h3>Regla contable rápida</h3><p class="help-note"><strong>Gasto</strong> = dinero que sale de tu patrimonio. <strong>Aportación</strong> = dinero que pasa de efectivo a ahorro/inversión. <strong>Traspaso interno</strong> = dinero que cambia de una cuenta/producto propio a otro. <strong>Intereses</strong> = dinero nuevo generado por una cuenta remunerada. <strong>Rentabilidad de inversión</strong> = cambio de valor del producto, visible en euros y porcentaje.</p></div>
 </section>
 
 </main>
@@ -548,7 +548,7 @@ label{display:block;font-size:11px;color:var(--text3);margin-bottom:5px;text-tra
 <div class="modal">
   <h3 id="prod-modal-title">Nuevo producto financiero</h3>
   <input type="hidden" id="prod-id">
-  <div class="form-row cols2"><div><label>Nombre</label><input type="text" id="prod-nombre" placeholder="Ej: Fidelity MSCI World"></div><div><label>Tipo</label><select id="prod-tipo"><option value="colchon">🛡️ Colchón de seguridad</option><option value="ahorro_conservador">💙 Ahorro conservador</option><option value="fondo_indexado">📈 Fondo indexado</option><option value="etf">📊 ETF</option><option value="fondo_activo">🎯 Fondo activo</option><option value="fondo_monetario">💰 Fondo monetario</option><option value="acciones">📉 Acciones</option><option value="otro">📦 Otro</option></select></div></div>
+  <div class="form-row cols2"><div><label>Nombre</label><input type="text" id="prod-nombre" placeholder="Ej: Fidelity MSCI World"></div><div><label>Tipo</label><select id="prod-tipo"><option value="cuenta_corriente">🏦 Cuenta corriente</option><option value="cuenta_remunerada">💶 Cuenta remunerada</option><option value="colchon">🛡️ Colchón de seguridad</option><option value="ahorro_conservador">💙 Ahorro conservador</option><option value="fondo_indexado">📈 Fondo indexado</option><option value="etf">📊 ETF</option><option value="fondo_activo">🎯 Fondo activo</option><option value="fondo_monetario">💰 Fondo monetario</option><option value="acciones">📉 Acciones</option><option value="otro">📦 Otro</option></select></div></div>
   <div class="form-row cols2"><div><label>Entidad</label><input type="text" id="prod-entidad" placeholder="Ej: Entidad demo"></div><div><label>ISIN (opcional)</label><input type="text" id="prod-isin" placeholder="Ej: Identificador demo"></div></div>
   <div class="form-row cols2"><div><label>Nivel de riesgo</label><select id="prod-riesgo"><option value="muy_bajo">Muy bajo</option><option value="bajo">Bajo</option><option value="medio">Medio</option><option value="alto">Alto</option><option value="muy_alto">Muy alto</option></select></div><div><label>Capital inicial aportado (€)</label><input type="number" id="prod-capital" step="0.01" placeholder="0.00" min="0"></div></div>
   <div class="form-row"><label>Fiscalidad básica</label><select id="prod-fiscalidad"><option value="no_indicada">No indicada</option><option value="fondo_traspasable">Fondo traspasable</option><option value="etf_no_traspasable">ETF no traspasable fiscalmente</option><option value="accion">Acción</option><option value="cuenta">Cuenta / depósito</option><option value="otro">Otro</option></select></div>
@@ -601,12 +601,16 @@ const IDB_STORE = 'app-state';
 const IDB_RECORD_ID = 'main';
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
-// Tipos que SÍ son inversión (excluye colchon y ahorro_conservador)
+// Tipos de productos
+// Inversión: se mide por capital aportado neto, valor de mercado y rentabilidad en € y %.
 const TIPOS_INVERSION = new Set(['fondo_indexado','etf','fondo_activo','fondo_monetario','acciones','otro']);
-const TIPOS_AHORRO = new Set(['colchon','ahorro_conservador']);
+// Ahorro: colchón, ahorro conservador y cuentas remuneradas.
+const TIPOS_AHORRO = new Set(['colchon','ahorro_conservador','cuenta_remunerada']);
+// Cuentas operativas: permiten saldo y traspasos, pero no se tratan como inversión.
+const TIPOS_CUENTA = new Set(['cuenta_corriente','cuenta_remunerada']);
 
 let db = {
-  movimientos:[],productos:[],seguimiento:[],traspasos:[],gastosPrevistos:[],ingresosPrevistos:[],
+  movimientos:[],productos:[],seguimiento:[],operacionesProducto:[],traspasos:[],gastosPrevistos:[],ingresosPrevistos:[],
   categorias:['Vivienda','Alimentación','Transporte','Ocio','Salud','Mascota','Formación','Viajes','Suscripciones','Otros'],
   catColores:{Vivienda:'#e74c3c',Alimentación:'#f39c12',Transporte:'#3498db',Ocio:'#9b59b6',Salud:'#2ecc71',Mascota:'#1abc9c',Formación:'#e67e22',Viajes:'#16a085',Suscripciones:'#8e44ad',Otros:'#7f8c8d'},
   metodos:['Cuenta corriente','Tarjeta crédito','Efectivo','Bizum'],
@@ -662,7 +666,7 @@ async function loadDB() {
     const parsed = await idbGet(IDB_RECORD_ID);
     if (!parsed) return;
     // Validación de esquema: solo copiamos campos conocidos
-    const validKeys = ['movimientos','productos','seguimiento','traspasos','gastosPrevistos','ingresosPrevistos','categorias','catColores','metodos','grupos','objetivos','checklist','meta','config'];
+    const validKeys = ['movimientos','productos','seguimiento','operacionesProducto','traspasos','gastosPrevistos','ingresosPrevistos','categorias','catColores','metodos','grupos','objetivos','checklist','meta','config'];
     validKeys.forEach(k => { if (parsed[k] !== undefined) db[k] = parsed[k]; });
   } catch(e) {
     console.warn('Error al cargar datos desde IndexedDB:', e);
@@ -772,11 +776,39 @@ function getTransferDelta(prodId, cutoffKey=null, afterKey=null) {
   },0);
 }
 
-// Capital total ajustado por traspasos internos.
-// Un traspaso desde un producto reduce su capital; hacia otro lo aumenta.
-// Así no aparece como pérdida: el patrimonio total se mantiene.
+function getOperacionesProducto(prodId, cutoffKey=null, afterKey=null) {
+  return (db.operacionesProducto||[]).filter(op=>{
+    if(op.prodId!==prodId) return false;
+    const key=(op.mesReferencia || (op.fecha||'').slice(0,7));
+    if(cutoffKey && key>cutoffKey) return false;
+    if(afterKey && key<=afterKey) return false;
+    return true;
+  });
+}
+
+// Delta de operaciones individuales. Los intereses aumentan el saldo, pero no el capital aportado.
+function getOperacionDelta(prodId, cutoffKey=null, afterKey=null, includeInterest=true) {
+  return getOperacionesProducto(prodId, cutoffKey, afterKey).reduce((sum,op)=>{
+    const imp=parseFloat(op.importe)||0;
+    if(op.tipo==='aportacion') return sum+imp;
+    if(op.tipo==='retirada') return sum-imp;
+    if(op.tipo==='interes') return includeInterest ? sum+imp : sum;
+    if(op.tipo==='ajuste') return sum+imp;
+    return sum;
+  },0);
+}
+
+function getInteresesProducto(prodId, cutoffKey=null) {
+  return getOperacionesProducto(prodId, cutoffKey).filter(op=>op.tipo==='interes').reduce((s,op)=>s+(parseFloat(op.importe)||0),0);
+}
+
+// Capital aportado neto: dinero propio colocado en el producto. No incluye intereses.
+// Así, una cuenta remunerada muestra como rentabilidad los intereses cobrados.
 function getCapitalTotalProducto(p, cutoffKey=null) {
-  return (parseFloat(p.capitalInicial)||0) + getSegsAportacion(p.id, cutoffKey) + getTransferDelta(p.id, cutoffKey);
+  return (parseFloat(p.capitalInicial)||0)
+    + getSegsAportacion(p.id, cutoffKey)
+    + getTransferDelta(p.id, cutoffKey)
+    + getOperacionDelta(p.id, cutoffKey, null, false);
 }
 
 // Último seguimiento registrado para un producto
@@ -787,15 +819,24 @@ function getLastSeg(prodId, cutoffKey=null) {
   return segs.sort((a,b)=>(b.anio-a.anio)||(b.mes-a.mes)||String(b.createdAt||'').localeCompare(String(a.createdAt||'')))[0];
 }
 
-// Valor actual de un producto: último valor registrado + traspasos posteriores.
-// Si no hay seguimiento, parte del capital inicial y aplica traspasos.
+// Valor/saldo actual:
+// - Si hay seguimiento mensual, usa el último valor registrado y suma operaciones/traspasos posteriores.
+// - Si no hay seguimiento, parte del capital inicial y aplica operaciones + traspasos.
 function getValorProducto(p, cutoffKey=null) {
   const last=getLastSeg(p.id, cutoffKey);
   if(last) {
     const lastKey=ym2str(last.anio,last.mes);
-    return (parseFloat(last.valorMercado)||0) + getTransferDelta(p.id, cutoffKey, lastKey);
+    return (parseFloat(last.valorMercado)||0)
+      + getTransferDelta(p.id, cutoffKey, lastKey)
+      + getOperacionDelta(p.id, cutoffKey, lastKey, true);
   }
-  return (parseFloat(p.capitalInicial)||0) + getTransferDelta(p.id, cutoffKey);
+  return (parseFloat(p.capitalInicial)||0)
+    + getTransferDelta(p.id, cutoffKey)
+    + getOperacionDelta(p.id, cutoffKey, null, true);
+}
+
+function getRentabilidadProducto(p, cutoffKey=null) {
+  return getValorProducto(p, cutoffKey) - getCapitalTotalProducto(p, cutoffKey);
 }
 
 // --- SEPARACIÓN AHORRO vs INVERSIÓN ---
@@ -1390,7 +1431,9 @@ function renderAhorro(){
     const ap=getCapitalTotalProducto(p);
     const rent=val-ap;
     const rentPct=ap>0?(rent/ap*100):0;
-    return `<div class="card ${p.tipo==='colchon'?'blue':'teal'}"><div class="label">${escHtml(p.nombre)}</div><div class="value">${fmt(val)}</div><div class="sub">${rent>=0?'▲':'▼'} ${fmtPct(rentPct)} | ${escHtml(p.entidad||'')}</div></div>`;
+    const intereses=getInteresesProducto(p.id);
+    const etiqueta=p.tipo==='cuenta_remunerada'?`Intereses: ${fmt(intereses)} · ${rent>=0?'▲':'▼'} ${fmtPct(rentPct)}`:`${rent>=0?'▲':'▼'} ${fmtPct(rentPct)}`;
+    return `<div class="card ${p.tipo==='colchon'?'blue':'teal'}"><div class="label">${escHtml(p.nombre)}</div><div class="value">${fmt(val)}</div><div class="sub">${etiqueta} | ${escHtml(p.entidad||'')}</div></div>`;
   };
   document.getElementById('ahorro-cards-colchon').innerHTML=colchones.length?colchones.map(buildCard).join(''):`<div class="empty" style="padding:16px">Sin productos de colchón. Añádelos en Productos financieros.</div>`;
   document.getElementById('ahorro-cards-conservador').innerHTML=conservadores.length?conservadores.map(buildCard).join(''):`<div class="empty" style="padding:16px">Sin productos de ahorro conservador.</div>`;
@@ -1442,7 +1485,7 @@ function renderInversiones(){
 // ============================================================
 // PRODUCTOS FINANCIEROS
 // ============================================================
-const tipoLabels={colchon:'🛡️ Colchón',ahorro_conservador:'💙 Ahorro conservador',fondo_indexado:'📈 Fondo indexado',etf:'📊 ETF',fondo_activo:'🎯 Fondo activo',fondo_monetario:'💰 Fondo monetario',acciones:'📉 Acciones',otro:'📦 Otro'};
+const tipoLabels={cuenta_corriente:'🏦 Cuenta corriente',cuenta_remunerada:'💶 Cuenta remunerada',colchon:'🛡️ Colchón',ahorro_conservador:'💙 Ahorro conservador',fondo_indexado:'📈 Fondo indexado',etf:'📊 ETF',fondo_activo:'🎯 Fondo activo',fondo_monetario:'💰 Fondo monetario',acciones:'📉 Acciones',otro:'📦 Otro'};
 const riesgoLabel={muy_bajo:'Muy bajo',bajo:'Bajo',medio:'Medio',alto:'Alto',muy_alto:'Muy alto'};
 const riesgoCls={muy_bajo:'badge-blue',bajo:'badge-teal',medio:'badge-amber',alto:'badge-red',muy_alto:'badge-red'};
 const fiscalidadLabel={no_indicada:'Fiscalidad no indicada',fondo_traspasable:'Fondo traspasable',etf_no_traspasable:'ETF no traspasable fiscalmente',accion:'Acción',cuenta:'Cuenta / depósito',otro:'Otro'};
@@ -1471,7 +1514,7 @@ function renderProductos(){
     return `<div class="panel mb16">
       <div class="flex jcsb mb16">
         <div><div style="font-size:16px;font-weight:600">${escHtml(p.nombre)}</div><div style="font-size:12px;color:var(--text3)">${tipoLabels[p.tipo]||p.tipo} · ${escHtml(p.entidad||'—')}${p.isin?' · '+escHtml(p.isin):''} · ${fiscalidadLabel[p.fiscalidad||'no_indicada']||'Fiscalidad no indicada'}</div></div>
-        <div class="flex gap8"><span class="badge ${riesgoCls[p.riesgo]}">${riesgoLabel[p.riesgo]||p.riesgo}</span><button class="btn btn-primary btn-sm" onclick="openSegModal('${p.id}')">+ Registrar mes</button><button class="icon-btn" onclick="editProducto('${p.id}')">✏️</button><button class="icon-btn" onclick="delProducto('${p.id}')">🗑️</button></div>
+        <div class="flex gap8"><span class="badge ${riesgoCls[p.riesgo]}">${riesgoLabel[p.riesgo]||p.riesgo}</span><button class="btn btn-primary btn-sm" onclick="openSegModal('${p.id}')">+ Registrar mes</button><button class="btn btn-ghost btn-sm" onclick="openOperacionProductoModal('${p.id}')">+ Operación</button><button class="icon-btn" onclick="editProducto('${p.id}')">✏️</button><button class="icon-btn" onclick="delProducto('${p.id}')">🗑️</button></div>
       </div>
       <div class="cards mb16">
         <div class="card amber"><div class="label">Capital aportado</div><div class="value">${fmt(ap)}</div></div>
@@ -1480,6 +1523,7 @@ function renderProductos(){
         <div class="card ${rentPct>=0?'green':'red'}"><div class="label">Rentabilidad %</div><div class="value">${rentPct>=0?'+':''}${fmtPct(rentPct)}</div></div>
       </div>
       ${segRows.length?`<table><thead><tr><th>Mes/Año</th><th>Aportación / traspaso</th><th>Capital ajustado</th><th>Valor mercado</th><th>Rent. €</th><th>Rent. %</th><th></th></tr></thead><tbody>${segRows.map(({sg,apHasta,r,rp})=>`<tr><td>${MESES[sg.mes-1]} ${sg.anio}</td><td>${fmt(parseFloat(sg.aportacion)||0)}</td><td>${fmt(apHasta)}</td><td>${fmt(parseFloat(sg.valorMercado)||0)}</td><td class="${r>=0?'text-green':'text-red'}">${r>=0?'+':''}${fmt(r)}</td><td class="${rp>=0?'text-green':'text-red'}">${rp>=0?'+':''}${fmtPct(rp)}</td><td><button class="icon-btn" onclick="delSeg('${sg.id}')">🗑️</button></td></tr>`).join('')}</tbody></table>`:`<div class="empty" style="padding:16px">Sin registros mensuales aún.</div>`}
+      ${renderOperacionesProductoMini(p.id)}
     </div>`;
   }).join('');
 }
@@ -1555,13 +1599,86 @@ function saveSeguimiento(){
     valorMercado,
     comentario:document.getElementById('seg-comentario').value
   };
-  // Sobreescribe si ya existe registro para ese mes/año/producto
-  db.seguimiento=db.seguimiento.filter(s=>!(s.prodId===seg.prodId&&s.mes===seg.mes&&s.anio===seg.anio));
-  db.seguimiento.push(seg);
+  // Se permiten varios registros en el mismo mes para poder revisar cada actualización.
+  // Para rentabilidad se usa el último registro del mes como valor de cierre más reciente.
+  db.seguimiento.push({...seg, createdAt:new Date().toISOString()});
   saveDB();closeModal('seg-modal');renderProductos();
 }
 function delSeg(id){if(!confirm('¿Eliminar este registro?'))return;db.seguimiento=db.seguimiento.filter(s=>s.id!==id);saveDB();renderProductos();}
 
+
+
+// ============================================================
+// OPERACIONES INDIVIDUALES DE PRODUCTOS / CUENTAS
+// ============================================================
+const opTipoLabel={aportacion:'Aportación / entrada',retirada:'Retirada / salida',interes:'Intereses',ajuste:'Ajuste'};
+const opTipoSign={aportacion:1,retirada:-1,interes:1,ajuste:1};
+
+function renderOperacionesProductoMini(prodId){
+  const ops=getOperacionesProducto(prodId).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)).slice(0,10);
+  if(!ops.length) return `<div class="empty" style="padding:12px">Sin operaciones individuales. Usa “+ Operación” para registrar aportaciones, retiradas o intereses sin resumirlas.</div>`;
+  return `<h4 style="margin:14px 0 8px">Operaciones individuales</h4><table><thead><tr><th>Fecha</th><th>Mes ref.</th><th>Concepto</th><th>Tipo</th><th>Importe</th><th></th></tr></thead><tbody>${ops.map(op=>{
+    const sign=op.tipo==='retirada'?-1:1;
+    const cls=op.tipo==='retirada'?'text-red':op.tipo==='interes'?'text-green':'text-blue';
+    return `<tr><td>${escHtml(op.fecha||'')}</td><td>${escHtml(op.mesReferencia || (op.fecha||'').slice(0,7))}</td><td>${escHtml(op.concepto||'')}</td><td>${escHtml(opTipoLabel[op.tipo]||op.tipo)}</td><td class="${cls}">${sign<0?'-':''}${fmt(parseFloat(op.importe)||0)}</td><td><button class="icon-btn" onclick="editOperacionProducto('${op.id}')">✏️</button><button class="icon-btn" onclick="delOperacionProducto('${op.id}')">🗑️</button></td></tr>`;
+  }).join('')}</tbody></table>`;
+}
+function openOperacionProductoModal(prodId, opId=null){
+  const p=db.productos.find(x=>x.id===prodId);
+  if(!p) return;
+  document.getElementById('op-prod-id').value=prodId;
+  document.getElementById('op-id').value=opId||'';
+  document.getElementById('op-prod-modal-title').textContent=(opId?'Editar operación — ':'Nueva operación — ')+p.nombre;
+  const today=new Date().toISOString().split('T')[0];
+  if(opId){
+    const op=(db.operacionesProducto||[]).find(x=>x.id===opId);
+    if(!op) return;
+    document.getElementById('op-fecha').value=op.fecha||today;
+    document.getElementById('op-mes-ref').value=op.mesReferencia || (op.fecha||today).slice(0,7);
+    document.getElementById('op-tipo').value=op.tipo||'aportacion';
+    document.getElementById('op-importe').value=op.importe||'';
+    document.getElementById('op-concepto').value=op.concepto||'';
+    document.getElementById('op-comentario').value=op.comentario||'';
+  } else {
+    document.getElementById('op-fecha').value=today;
+    document.getElementById('op-mes-ref').value=today.slice(0,7);
+    document.getElementById('op-tipo').value=(p.tipo==='cuenta_remunerada')?'interes':'aportacion';
+    document.getElementById('op-importe').value='';
+    document.getElementById('op-concepto').value='';
+    document.getElementById('op-comentario').value='';
+  }
+  openModal('op-prod-modal');
+}
+function editOperacionProducto(opId){
+  const op=(db.operacionesProducto||[]).find(x=>x.id===opId);
+  if(op) openOperacionProductoModal(op.prodId, opId);
+}
+function saveOperacionProducto(){
+  const prodId=document.getElementById('op-prod-id').value;
+  const id=document.getElementById('op-id').value;
+  const fecha=document.getElementById('op-fecha').value;
+  const importe=parseFloat(document.getElementById('op-importe').value);
+  if(!fecha){showToast('La fecha es obligatoria.','warning');return;}
+  if(isNaN(importe)||importe<=0){showToast('El importe debe ser mayor que cero.','warning');return;}
+  const op={
+    id:id||uid(), prodId, fecha,
+    mesReferencia:document.getElementById('op-mes-ref').value || fecha.slice(0,7),
+    tipo:document.getElementById('op-tipo').value,
+    importe,
+    concepto:document.getElementById('op-concepto').value.trim() || (opTipoLabel[document.getElementById('op-tipo').value]||'Operación'),
+    comentario:document.getElementById('op-comentario').value,
+    createdAt:new Date().toISOString()
+  };
+  db.operacionesProducto=db.operacionesProducto||[];
+  if(id) db.operacionesProducto=db.operacionesProducto.map(x=>x.id===id?op:x);
+  else db.operacionesProducto.push(op);
+  saveDB(); closeModal('op-prod-modal'); renderProductos(); renderAhorro(); renderInversiones();
+}
+function delOperacionProducto(id){
+  if(!confirm('¿Eliminar esta operación individual?')) return;
+  db.operacionesProducto=(db.operacionesProducto||[]).filter(op=>op.id!==id);
+  saveDB(); renderProductos(); renderAhorro(); renderInversiones();
+}
 
 // ============================================================
 // TRASPASOS INTERNOS
@@ -1948,7 +2065,7 @@ async function saveRevisionChecklist(){
 }
 async function resetAppData(){
   if(!confirm('¿Seguro que quieres borrar todos los datos locales de la app? Esta acción no se puede deshacer salvo que tengas una copia JSON.')) return;
-  db={movimientos:[],productos:[],seguimiento:[],traspasos:[],gastosPrevistos:[],ingresosPrevistos:[],categorias:['Vivienda','Alimentación','Transporte','Ocio','Salud','Mascota','Formación','Viajes','Suscripciones','Otros'],catColores:{Vivienda:'#e74c3c',Alimentación:'#f39c12',Transporte:'#3498db',Ocio:'#9b59b6',Salud:'#2ecc71',Mascota:'#1abc9c',Formación:'#e67e22',Viajes:'#16a085',Suscripciones:'#8e44ad',Otros:'#7f8c8d'},metodos:['Cuenta corriente','Tarjeta crédito','Efectivo','Bizum'],grupos:[],objetivos:{ahorro:0,inversion:0,patrimonio:0,emergencia:0},checklist:{},meta:{lastBackup:null,demoLoaded:false},config:{limites:{},alertas:{ahorro:true,gasto:true,inversion:true,colchon:3000}}};
+  db={movimientos:[],productos:[],seguimiento:[],operacionesProducto:[],traspasos:[],gastosPrevistos:[],ingresosPrevistos:[],categorias:['Vivienda','Alimentación','Transporte','Ocio','Salud','Mascota','Formación','Viajes','Suscripciones','Otros'],catColores:{Vivienda:'#e74c3c',Alimentación:'#f39c12',Transporte:'#3498db',Ocio:'#9b59b6',Salud:'#2ecc71',Mascota:'#1abc9c',Formación:'#e67e22',Viajes:'#16a085',Suscripciones:'#8e44ad',Otros:'#7f8c8d'},metodos:['Cuenta corriente','Tarjeta crédito','Efectivo','Bizum'],grupos:[],objetivos:{ahorro:0,inversion:0,patrimonio:0,emergencia:0},checklist:{},meta:{lastBackup:null,demoLoaded:false},config:{limites:{},alertas:{ahorro:true,gasto:true,inversion:true,colchon:3000}}};
   await saveDB(); populateMonthSelects(); renderDashboard(); renderDatos(); showToast('Datos borrados. App lista para empezar desde cero.','info');
 }
 async function loadDemoManually(){
