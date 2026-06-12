@@ -374,7 +374,7 @@ label{display:block;font-size:11px;color:var(--text3);margin-bottom:5px;text-tra
     <h2 style="margin:0">Traspasos internos</h2>
     <button class="btn btn-primary btn-sm" onclick="openTraspasoModal()">+ Nuevo traspaso</button>
   </div>
-  <div class="alert alert-info mb16">ℹ️ Usa esta sección para mover dinero entre cuentas o productos propios: BBVA ↔ ING, MyInvestor ↔ BBVA, colchón → inversión, etc. No cuenta como gasto, ingreso ni pérdida; solo cambia el dinero de sitio.</div>
+  <div class="alert alert-info mb16">ℹ️ Usa esta sección para mover dinero entre productos: por ejemplo, del colchón de seguridad a un fondo indexado. No cuenta como gasto, ingreso ni pérdida; solo cambia el dinero de sitio.</div>
   <div id="traspasos-summary" class="cards mb24"></div>
   <div class="panel"><div id="traspasos-table-wrap"></div></div>
 </section>
@@ -478,7 +478,7 @@ label{display:block;font-size:11px;color:var(--text3);margin-bottom:5px;text-tra
   <div class="alert alert-info mb16">ℹ️ Esta checklist te ayuda a revisar la app cada mes sin mezclar gastos, aportaciones y traspasos.</div>
   <div class="cards" id="revision-cards"></div>
   <div class="panel mb24"><h3>Checklist del mes</h3><div id="revision-checklist" class="checklist"></div><button class="btn btn-primary mt16" onclick="saveRevisionChecklist()">Guardar revisión</button></div>
-  <div class="panel"><h3>Regla contable rápida</h3><p class="help-note"><strong>Gasto</strong> = dinero que sale de tu patrimonio. <strong>Aportación</strong> = dinero que pasa de efectivo a ahorro/inversión. <strong>Traspaso interno</strong> = dinero que cambia de una cuenta/producto propio a otro. <strong>Intereses</strong> = dinero nuevo generado por una cuenta remunerada. <strong>Rentabilidad de inversión</strong> = cambio de valor del producto, visible en euros y porcentaje.</p></div>
+  <div class="panel"><h3>Regla contable rápida</h3><p class="help-note"><strong>Gasto</strong> = dinero que sale de tu patrimonio. <strong>Aportación</strong> = dinero que pasa de efectivo a inversión. <strong>Traspaso interno</strong> = dinero que cambia de un producto a otro. <strong>Rentabilidad</strong> = cambio de valor del producto, no movimiento de dinero.</p></div>
 </section>
 
 </main>
@@ -567,6 +567,27 @@ label{display:block;font-size:11px;color:var(--text3);margin-bottom:5px;text-tra
   <div class="flex gap8 mt16"><button class="btn btn-primary" onclick="saveSeguimiento()">Guardar</button><button class="btn btn-ghost" onclick="closeModal('seg-modal')">Cancelar</button></div>
 </div></div>
 
+
+<!-- MODAL OPERACIÓN DE PRODUCTO -->
+<div class="modal-bg" id="op-modal">
+<div class="modal">
+  <h3 id="op-modal-title">Nueva operación</h3>
+  <input type="hidden" id="op-id">
+  <input type="hidden" id="op-prod-id">
+  <div class="form-row cols2">
+    <div><label>Fecha real</label><input type="date" id="op-fecha"></div>
+    <div><label>Mes de referencia</label><input type="month" id="op-mesref"></div>
+  </div>
+  <div class="form-row cols2">
+    <div><label>Tipo de operación</label><select id="op-tipo"><option value="aportacion">Aportación / entrada propia</option><option value="retirada">Retirada / salida propia</option><option value="interes">Intereses / rentabilidad abonada</option><option value="comision">Comisión / coste del producto</option></select></div>
+    <div><label>Importe (€)</label><input type="number" id="op-importe" step="0.01" placeholder="0.00" min="0"></div>
+  </div>
+  <div class="form-row"><label>Concepto</label><input type="text" id="op-concepto" placeholder="Ej: Intereses ING, aportación mensual, retirada a BBVA..."></div>
+  <div class="form-row"><label>Comentario</label><textarea id="op-comentario"></textarea></div>
+  <div class="alert alert-info">Las operaciones quedan guardadas una a una. No se fusionan por mes. Las aportaciones y retiradas ajustan el capital aportado; los intereses aumentan rentabilidad; las comisiones la reducen.</div>
+  <div class="flex gap8 mt16"><button class="btn btn-primary" onclick="saveOperacion()">Guardar operación</button><button class="btn btn-ghost" onclick="closeModal('op-modal')">Cancelar</button></div>
+</div></div>
+
 <!-- MODAL TRASPASO INTERNO -->
 <div class="modal-bg" id="traspaso-modal">
 <div class="modal">
@@ -601,16 +622,13 @@ const IDB_STORE = 'app-state';
 const IDB_RECORD_ID = 'main';
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
-// Tipos de productos
-// Inversión: se mide por capital aportado neto, valor de mercado y rentabilidad en € y %.
+// Tipos que SÍ son inversión (excluye colchon y ahorro_conservador)
 const TIPOS_INVERSION = new Set(['fondo_indexado','etf','fondo_activo','fondo_monetario','acciones','otro']);
-// Ahorro: colchón, ahorro conservador y cuentas remuneradas.
 const TIPOS_AHORRO = new Set(['colchon','ahorro_conservador','cuenta_remunerada']);
-// Cuentas operativas: permiten saldo y traspasos, pero no se tratan como inversión.
 const TIPOS_CUENTA = new Set(['cuenta_corriente','cuenta_remunerada']);
 
 let db = {
-  movimientos:[],productos:[],seguimiento:[],operacionesProducto:[],traspasos:[],gastosPrevistos:[],ingresosPrevistos:[],
+  movimientos:[],productos:[],seguimiento:[],operaciones:[],traspasos:[],gastosPrevistos:[],ingresosPrevistos:[],
   categorias:['Vivienda','Alimentación','Transporte','Ocio','Salud','Mascota','Formación','Viajes','Suscripciones','Otros'],
   catColores:{Vivienda:'#e74c3c',Alimentación:'#f39c12',Transporte:'#3498db',Ocio:'#9b59b6',Salud:'#2ecc71',Mascota:'#1abc9c',Formación:'#e67e22',Viajes:'#16a085',Suscripciones:'#8e44ad',Otros:'#7f8c8d'},
   metodos:['Cuenta corriente','Tarjeta crédito','Efectivo','Bizum'],
@@ -666,8 +684,9 @@ async function loadDB() {
     const parsed = await idbGet(IDB_RECORD_ID);
     if (!parsed) return;
     // Validación de esquema: solo copiamos campos conocidos
-    const validKeys = ['movimientos','productos','seguimiento','operacionesProducto','traspasos','gastosPrevistos','ingresosPrevistos','categorias','catColores','metodos','grupos','objetivos','checklist','meta','config'];
+    const validKeys = ['movimientos','productos','seguimiento','operaciones','traspasos','gastosPrevistos','ingresosPrevistos','categorias','catColores','metodos','grupos','objetivos','checklist','meta','config'];
     validKeys.forEach(k => { if (parsed[k] !== undefined) db[k] = parsed[k]; });
+    db.operaciones=db.operaciones||[];
   } catch(e) {
     console.warn('Error al cargar datos desde IndexedDB:', e);
     showToast('⚠️ No se pudieron cargar los datos locales. Revisa permisos del navegador.', 'warning');
@@ -776,39 +795,44 @@ function getTransferDelta(prodId, cutoffKey=null, afterKey=null) {
   },0);
 }
 
+
+function getOperacionKey(op) {
+  return op.mesReferencia || (op.fecha || '').slice(0,7);
+}
 function getOperacionesProducto(prodId, cutoffKey=null, afterKey=null) {
-  return (db.operacionesProducto||[]).filter(op=>{
+  return (db.operaciones||[]).filter(op=>{
+    const key=getOperacionKey(op);
     if(op.prodId!==prodId) return false;
-    const key=(op.mesReferencia || (op.fecha||'').slice(0,7));
     if(cutoffKey && key>cutoffKey) return false;
     if(afterKey && key<=afterKey) return false;
     return true;
   });
 }
-
-// Delta de operaciones individuales. Los intereses aumentan el saldo, pero no el capital aportado.
-function getOperacionDelta(prodId, cutoffKey=null, afterKey=null, includeInterest=true) {
+function getOperacionCapitalDelta(prodId, cutoffKey=null, afterKey=null) {
   return getOperacionesProducto(prodId, cutoffKey, afterKey).reduce((sum,op)=>{
     const imp=parseFloat(op.importe)||0;
     if(op.tipo==='aportacion') return sum+imp;
     if(op.tipo==='retirada') return sum-imp;
-    if(op.tipo==='interes') return includeInterest ? sum+imp : sum;
-    if(op.tipo==='ajuste') return sum+imp;
     return sum;
   },0);
 }
-
+function getOperacionValueDelta(prodId, cutoffKey=null, afterKey=null) {
+  return getOperacionesProducto(prodId, cutoffKey, afterKey).reduce((sum,op)=>{
+    const imp=parseFloat(op.importe)||0;
+    if(op.tipo==='aportacion' || op.tipo==='interes') return sum+imp;
+    if(op.tipo==='retirada' || op.tipo==='comision') return sum-imp;
+    return sum;
+  },0);
+}
 function getInteresesProducto(prodId, cutoffKey=null) {
-  return getOperacionesProducto(prodId, cutoffKey).filter(op=>op.tipo==='interes').reduce((s,op)=>s+(parseFloat(op.importe)||0),0);
+  return getOperacionesProducto(prodId, cutoffKey).reduce((sum,op)=> sum + (op.tipo==='interes' ? (parseFloat(op.importe)||0) : 0), 0);
 }
 
-// Capital aportado neto: dinero propio colocado en el producto. No incluye intereses.
-// Así, una cuenta remunerada muestra como rentabilidad los intereses cobrados.
+// Capital total ajustado por traspasos internos.
+// Un traspaso desde un producto reduce su capital; hacia otro lo aumenta.
+// Así no aparece como pérdida: el patrimonio total se mantiene.
 function getCapitalTotalProducto(p, cutoffKey=null) {
-  return (parseFloat(p.capitalInicial)||0)
-    + getSegsAportacion(p.id, cutoffKey)
-    + getTransferDelta(p.id, cutoffKey)
-    + getOperacionDelta(p.id, cutoffKey, null, false);
+  return (parseFloat(p.capitalInicial)||0) + getSegsAportacion(p.id, cutoffKey) + getTransferDelta(p.id, cutoffKey) + getOperacionCapitalDelta(p.id, cutoffKey);
 }
 
 // Último seguimiento registrado para un producto
@@ -819,24 +843,15 @@ function getLastSeg(prodId, cutoffKey=null) {
   return segs.sort((a,b)=>(b.anio-a.anio)||(b.mes-a.mes)||String(b.createdAt||'').localeCompare(String(a.createdAt||'')))[0];
 }
 
-// Valor/saldo actual:
-// - Si hay seguimiento mensual, usa el último valor registrado y suma operaciones/traspasos posteriores.
-// - Si no hay seguimiento, parte del capital inicial y aplica operaciones + traspasos.
+// Valor actual de un producto: último valor registrado + traspasos posteriores.
+// Si no hay seguimiento, parte del capital inicial y aplica traspasos.
 function getValorProducto(p, cutoffKey=null) {
   const last=getLastSeg(p.id, cutoffKey);
   if(last) {
     const lastKey=ym2str(last.anio,last.mes);
-    return (parseFloat(last.valorMercado)||0)
-      + getTransferDelta(p.id, cutoffKey, lastKey)
-      + getOperacionDelta(p.id, cutoffKey, lastKey, true);
+    return (parseFloat(last.valorMercado)||0) + getTransferDelta(p.id, cutoffKey, lastKey) + getOperacionValueDelta(p.id, cutoffKey, lastKey);
   }
-  return (parseFloat(p.capitalInicial)||0)
-    + getTransferDelta(p.id, cutoffKey)
-    + getOperacionDelta(p.id, cutoffKey, null, true);
-}
-
-function getRentabilidadProducto(p, cutoffKey=null) {
-  return getValorProducto(p, cutoffKey) - getCapitalTotalProducto(p, cutoffKey);
+  return (parseFloat(p.capitalInicial)||0) + getTransferDelta(p.id, cutoffKey) + getOperacionValueDelta(p.id, cutoffKey);
 }
 
 // --- SEPARACIÓN AHORRO vs INVERSIÓN ---
@@ -1431,9 +1446,7 @@ function renderAhorro(){
     const ap=getCapitalTotalProducto(p);
     const rent=val-ap;
     const rentPct=ap>0?(rent/ap*100):0;
-    const intereses=getInteresesProducto(p.id);
-    const etiqueta=p.tipo==='cuenta_remunerada'?`Intereses: ${fmt(intereses)} · ${rent>=0?'▲':'▼'} ${fmtPct(rentPct)}`:`${rent>=0?'▲':'▼'} ${fmtPct(rentPct)}`;
-    return `<div class="card ${p.tipo==='colchon'?'blue':'teal'}"><div class="label">${escHtml(p.nombre)}</div><div class="value">${fmt(val)}</div><div class="sub">${etiqueta} | ${escHtml(p.entidad||'')}</div></div>`;
+    return `<div class="card ${p.tipo==='colchon'?'blue':'teal'}"><div class="label">${escHtml(p.nombre)}</div><div class="value">${fmt(val)}</div><div class="sub">${rent>=0?'▲':'▼'} ${fmtPct(rentPct)} | ${escHtml(p.entidad||'')}</div></div>`;
   };
   document.getElementById('ahorro-cards-colchon').innerHTML=colchones.length?colchones.map(buildCard).join(''):`<div class="empty" style="padding:16px">Sin productos de colchón. Añádelos en Productos financieros.</div>`;
   document.getElementById('ahorro-cards-conservador').innerHTML=conservadores.length?conservadores.map(buildCard).join(''):`<div class="empty" style="padding:16px">Sin productos de ahorro conservador.</div>`;
@@ -1514,7 +1527,7 @@ function renderProductos(){
     return `<div class="panel mb16">
       <div class="flex jcsb mb16">
         <div><div style="font-size:16px;font-weight:600">${escHtml(p.nombre)}</div><div style="font-size:12px;color:var(--text3)">${tipoLabels[p.tipo]||p.tipo} · ${escHtml(p.entidad||'—')}${p.isin?' · '+escHtml(p.isin):''} · ${fiscalidadLabel[p.fiscalidad||'no_indicada']||'Fiscalidad no indicada'}</div></div>
-        <div class="flex gap8"><span class="badge ${riesgoCls[p.riesgo]}">${riesgoLabel[p.riesgo]||p.riesgo}</span><button class="btn btn-primary btn-sm" onclick="openSegModal('${p.id}')">+ Registrar mes</button><button class="btn btn-ghost btn-sm" onclick="openOperacionProductoModal('${p.id}')">+ Operación</button><button class="icon-btn" onclick="editProducto('${p.id}')">✏️</button><button class="icon-btn" onclick="delProducto('${p.id}')">🗑️</button></div>
+        <div class="flex gap8"><span class="badge ${riesgoCls[p.riesgo]}">${riesgoLabel[p.riesgo]||p.riesgo}</span><button class="btn btn-primary btn-sm" onclick="openOperacionModal('${p.id}')">+ Operación</button><button class="btn btn-ghost btn-sm" onclick="openSegModal('${p.id}')">+ Valor mensual</button><button class="icon-btn" onclick="editProducto('${p.id}')">✏️</button><button class="icon-btn" onclick="delProducto('${p.id}')">🗑️</button></div>
       </div>
       <div class="cards mb16">
         <div class="card amber"><div class="label">Capital aportado</div><div class="value">${fmt(ap)}</div></div>
@@ -1522,10 +1535,94 @@ function renderProductos(){
         <div class="card ${rent>=0?'green':'red'}"><div class="label">Rentabilidad €</div><div class="value">${rent>=0?'+':''}${fmt(rent)}</div></div>
         <div class="card ${rentPct>=0?'green':'red'}"><div class="label">Rentabilidad %</div><div class="value">${rentPct>=0?'+':''}${fmtPct(rentPct)}</div></div>
       </div>
-      ${segRows.length?`<table><thead><tr><th>Mes/Año</th><th>Aportación / traspaso</th><th>Capital ajustado</th><th>Valor mercado</th><th>Rent. €</th><th>Rent. %</th><th></th></tr></thead><tbody>${segRows.map(({sg,apHasta,r,rp})=>`<tr><td>${MESES[sg.mes-1]} ${sg.anio}</td><td>${fmt(parseFloat(sg.aportacion)||0)}</td><td>${fmt(apHasta)}</td><td>${fmt(parseFloat(sg.valorMercado)||0)}</td><td class="${r>=0?'text-green':'text-red'}">${r>=0?'+':''}${fmt(r)}</td><td class="${rp>=0?'text-green':'text-red'}">${rp>=0?'+':''}${fmtPct(rp)}</td><td><button class="icon-btn" onclick="delSeg('${sg.id}')">🗑️</button></td></tr>`).join('')}</tbody></table>`:`<div class="empty" style="padding:16px">Sin registros mensuales aún.</div>`}
-      ${renderOperacionesProductoMini(p.id)}
+      <h4 style="margin:10px 0 8px">Operaciones individuales</h4>
+      ${renderOperacionesProducto(p.id)}
+      <h4 style="margin:18px 0 8px">Valoración mensual</h4>
+      ${segRows.length?`<table><thead><tr><th>Mes/Año</th><th>Aportación mes</th><th>Capital ajustado</th><th>Valor mercado</th><th>Rent. €</th><th>Rent. %</th><th></th></tr></thead><tbody>${segRows.map(({sg,apHasta,r,rp})=>`<tr><td>${MESES[sg.mes-1]} ${sg.anio}</td><td>${fmt(parseFloat(sg.aportacion)||0)}</td><td>${fmt(apHasta)}</td><td>${fmt(parseFloat(sg.valorMercado)||0)}</td><td class="${r>=0?'text-green':'text-red'}">${r>=0?'+':''}${fmt(r)}</td><td class="${rp>=0?'text-green':'text-red'}">${rp>=0?'+':''}${fmtPct(rp)}</td><td><button class="icon-btn" onclick="delSeg('${sg.id}')">🗑️</button></td></tr>`).join('')}</tbody></table>`:`<div class="empty" style="padding:16px">Sin valoraciones mensuales aún.</div>`}
     </div>`;
   }).join('');
+}
+
+
+function opTipoLabel(tipo){
+  return ({aportacion:'Aportación',retirada:'Retirada',interes:'Intereses',comision:'Comisión'})[tipo] || tipo;
+}
+function opSignedAmount(op){
+  const imp=parseFloat(op.importe)||0;
+  if(op.tipo==='retirada' || op.tipo==='comision') return -imp;
+  return imp;
+}
+function renderOperacionesProducto(prodId){
+  db.operaciones=db.operaciones||[];
+  const ops=db.operaciones.filter(o=>o.prodId===prodId).sort((a,b)=>String(b.fecha||'').localeCompare(String(a.fecha||'')) || String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+  if(!ops.length) return `<div class="empty" style="padding:16px">Sin operaciones individuales. Usa <strong>+ Operación</strong> para registrar aportaciones, intereses, retiradas o comisiones sin fusionarlas por mes.</div>`;
+  return `<table><thead><tr><th>Fecha real</th><th>Mes ref.</th><th>Tipo</th><th>Concepto</th><th>Importe</th><th>Comentario</th><th></th></tr></thead><tbody>${ops.map(op=>{
+    const signed=opSignedAmount(op);
+    return `<tr><td>${op.fecha||'—'}</td><td>${op.mesReferencia||((op.fecha||'').slice(0,7))||'—'}</td><td>${opTipoLabel(op.tipo)}</td><td>${escHtml(op.concepto||'—')}</td><td class="${signed>=0?'text-green':'text-red'}">${signed>=0?'+':''}${fmt(signed)}</td><td>${escHtml(op.comentario||'')}</td><td><button class="icon-btn" onclick="editOperacion('${op.id}')">✏️</button><button class="icon-btn" onclick="delOperacion('${op.id}')">🗑️</button></td></tr>`;
+  }).join('')}</tbody></table>`;
+}
+function openOperacionModal(prodId, opId=null){
+  db.operaciones=db.operaciones||[];
+  const p=db.productos.find(x=>x.id===prodId);
+  if(!p){showToast('No se encuentra el producto','danger');return;}
+  document.getElementById('op-prod-id').value=prodId;
+  document.getElementById('op-id').value=opId||'';
+  if(opId){
+    const op=db.operaciones.find(x=>x.id===opId);
+    if(!op){showToast('No se encuentra la operación','danger');return;}
+    document.getElementById('op-modal-title').textContent='Editar operación — '+p.nombre;
+    document.getElementById('op-fecha').value=op.fecha||new Date().toISOString().split('T')[0];
+    document.getElementById('op-mesref').value=op.mesReferencia||((op.fecha||'').slice(0,7));
+    document.getElementById('op-tipo').value=op.tipo||'aportacion';
+    document.getElementById('op-importe').value=op.importe||0;
+    document.getElementById('op-concepto').value=op.concepto||'';
+    document.getElementById('op-comentario').value=op.comentario||'';
+  }else{
+    const hoy=new Date().toISOString().split('T')[0];
+    document.getElementById('op-modal-title').textContent='Nueva operación — '+p.nombre;
+    document.getElementById('op-fecha').value=hoy;
+    document.getElementById('op-mesref').value=hoy.slice(0,7);
+    document.getElementById('op-tipo').value=(p.tipo==='cuenta_remunerada')?'interes':'aportacion';
+    document.getElementById('op-importe').value='';
+    document.getElementById('op-concepto').value='';
+    document.getElementById('op-comentario').value='';
+  }
+  openModal('op-modal');
+}
+function editOperacion(opId){
+  const op=(db.operaciones||[]).find(x=>x.id===opId);
+  if(!op){showToast('No se encuentra la operación','danger');return;}
+  openOperacionModal(op.prodId, opId);
+}
+function saveOperacion(){
+  db.operaciones=db.operaciones||[];
+  const prodId=document.getElementById('op-prod-id').value;
+  const id=document.getElementById('op-id').value;
+  const fecha=document.getElementById('op-fecha').value;
+  const importe=parseFloat(document.getElementById('op-importe').value);
+  if(!prodId||!db.productos.some(p=>p.id===prodId)){showToast('Selecciona un producto válido','warning');return;}
+  if(!fecha){showToast('La fecha es obligatoria','warning');return;}
+  if(isNaN(importe)||importe<=0){showToast('El importe debe ser mayor que cero','warning');return;}
+  const op={
+    id:id||uid(),
+    prodId,
+    fecha,
+    mesReferencia:document.getElementById('op-mesref').value||fecha.slice(0,7),
+    tipo:document.getElementById('op-tipo').value,
+    importe,
+    concepto:document.getElementById('op-concepto').value.trim(),
+    comentario:document.getElementById('op-comentario').value,
+    createdAt:id?((db.operaciones.find(x=>x.id===id)||{}).createdAt||new Date().toISOString()):new Date().toISOString(),
+    updatedAt:new Date().toISOString()
+  };
+  if(id) db.operaciones=db.operaciones.map(x=>x.id===id?op:x);
+  else db.operaciones.push(op);
+  saveDB();closeModal('op-modal');renderProductos();renderDashboard();
+}
+function delOperacion(id){
+  if(!confirm('¿Eliminar esta operación del producto?'))return;
+  db.operaciones=(db.operaciones||[]).filter(o=>o.id!==id);
+  saveDB();renderProductos();renderDashboard();
 }
 
 function openProdModal(id){
@@ -1545,14 +1642,14 @@ function openProdModal(id){
     document.getElementById('prod-modal-title').textContent='Nuevo producto financiero';
     ['prod-nombre','prod-entidad','prod-isin','prod-comentario'].forEach(i=>document.getElementById(i).value='');
     document.getElementById('prod-capital').value=0;
-    document.getElementById('prod-tipo').value='fondo_indexado';
+    document.getElementById('prod-tipo').value='cuenta_corriente';
     document.getElementById('prod-riesgo').value='bajo';
     document.getElementById('prod-fiscalidad').value='no_indicada';
   }
   openModal('prod-modal');
 }
 function editProducto(id){openProdModal(id);}
-function delProducto(id){if(!confirm('¿Eliminar este producto y todo su seguimiento?'))return;db.productos=db.productos.filter(p=>p.id!==id);db.seguimiento=db.seguimiento.filter(s=>s.prodId!==id);saveDB();renderProductos();}
+function delProducto(id){if(!confirm('¿Eliminar este producto y todo su seguimiento?'))return;db.productos=db.productos.filter(p=>p.id!==id);db.seguimiento=db.seguimiento.filter(s=>s.prodId!==id);db.operaciones=(db.operaciones||[]).filter(o=>o.prodId!==id);saveDB();renderProductos();}
 function saveProducto(){
   const nombre=document.getElementById('prod-nombre').value.trim();
   if(!nombre){showToast('El nombre del producto no puede estar vacío','warning');return;}
@@ -1599,86 +1696,13 @@ function saveSeguimiento(){
     valorMercado,
     comentario:document.getElementById('seg-comentario').value
   };
-  // Se permiten varios registros en el mismo mes para poder revisar cada actualización.
-  // Para rentabilidad se usa el último registro del mes como valor de cierre más reciente.
-  db.seguimiento.push({...seg, createdAt:new Date().toISOString()});
+  // Sobreescribe si ya existe registro para ese mes/año/producto
+  db.seguimiento=db.seguimiento.filter(s=>!(s.prodId===seg.prodId&&s.mes===seg.mes&&s.anio===seg.anio));
+  db.seguimiento.push(seg);
   saveDB();closeModal('seg-modal');renderProductos();
 }
 function delSeg(id){if(!confirm('¿Eliminar este registro?'))return;db.seguimiento=db.seguimiento.filter(s=>s.id!==id);saveDB();renderProductos();}
 
-
-
-// ============================================================
-// OPERACIONES INDIVIDUALES DE PRODUCTOS / CUENTAS
-// ============================================================
-const opTipoLabel={aportacion:'Aportación / entrada',retirada:'Retirada / salida',interes:'Intereses',ajuste:'Ajuste'};
-const opTipoSign={aportacion:1,retirada:-1,interes:1,ajuste:1};
-
-function renderOperacionesProductoMini(prodId){
-  const ops=getOperacionesProducto(prodId).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)).slice(0,10);
-  if(!ops.length) return `<div class="empty" style="padding:12px">Sin operaciones individuales. Usa “+ Operación” para registrar aportaciones, retiradas o intereses sin resumirlas.</div>`;
-  return `<h4 style="margin:14px 0 8px">Operaciones individuales</h4><table><thead><tr><th>Fecha</th><th>Mes ref.</th><th>Concepto</th><th>Tipo</th><th>Importe</th><th></th></tr></thead><tbody>${ops.map(op=>{
-    const sign=op.tipo==='retirada'?-1:1;
-    const cls=op.tipo==='retirada'?'text-red':op.tipo==='interes'?'text-green':'text-blue';
-    return `<tr><td>${escHtml(op.fecha||'')}</td><td>${escHtml(op.mesReferencia || (op.fecha||'').slice(0,7))}</td><td>${escHtml(op.concepto||'')}</td><td>${escHtml(opTipoLabel[op.tipo]||op.tipo)}</td><td class="${cls}">${sign<0?'-':''}${fmt(parseFloat(op.importe)||0)}</td><td><button class="icon-btn" onclick="editOperacionProducto('${op.id}')">✏️</button><button class="icon-btn" onclick="delOperacionProducto('${op.id}')">🗑️</button></td></tr>`;
-  }).join('')}</tbody></table>`;
-}
-function openOperacionProductoModal(prodId, opId=null){
-  const p=db.productos.find(x=>x.id===prodId);
-  if(!p) return;
-  document.getElementById('op-prod-id').value=prodId;
-  document.getElementById('op-id').value=opId||'';
-  document.getElementById('op-prod-modal-title').textContent=(opId?'Editar operación — ':'Nueva operación — ')+p.nombre;
-  const today=new Date().toISOString().split('T')[0];
-  if(opId){
-    const op=(db.operacionesProducto||[]).find(x=>x.id===opId);
-    if(!op) return;
-    document.getElementById('op-fecha').value=op.fecha||today;
-    document.getElementById('op-mes-ref').value=op.mesReferencia || (op.fecha||today).slice(0,7);
-    document.getElementById('op-tipo').value=op.tipo||'aportacion';
-    document.getElementById('op-importe').value=op.importe||'';
-    document.getElementById('op-concepto').value=op.concepto||'';
-    document.getElementById('op-comentario').value=op.comentario||'';
-  } else {
-    document.getElementById('op-fecha').value=today;
-    document.getElementById('op-mes-ref').value=today.slice(0,7);
-    document.getElementById('op-tipo').value=(p.tipo==='cuenta_remunerada')?'interes':'aportacion';
-    document.getElementById('op-importe').value='';
-    document.getElementById('op-concepto').value='';
-    document.getElementById('op-comentario').value='';
-  }
-  openModal('op-prod-modal');
-}
-function editOperacionProducto(opId){
-  const op=(db.operacionesProducto||[]).find(x=>x.id===opId);
-  if(op) openOperacionProductoModal(op.prodId, opId);
-}
-function saveOperacionProducto(){
-  const prodId=document.getElementById('op-prod-id').value;
-  const id=document.getElementById('op-id').value;
-  const fecha=document.getElementById('op-fecha').value;
-  const importe=parseFloat(document.getElementById('op-importe').value);
-  if(!fecha){showToast('La fecha es obligatoria.','warning');return;}
-  if(isNaN(importe)||importe<=0){showToast('El importe debe ser mayor que cero.','warning');return;}
-  const op={
-    id:id||uid(), prodId, fecha,
-    mesReferencia:document.getElementById('op-mes-ref').value || fecha.slice(0,7),
-    tipo:document.getElementById('op-tipo').value,
-    importe,
-    concepto:document.getElementById('op-concepto').value.trim() || (opTipoLabel[document.getElementById('op-tipo').value]||'Operación'),
-    comentario:document.getElementById('op-comentario').value,
-    createdAt:new Date().toISOString()
-  };
-  db.operacionesProducto=db.operacionesProducto||[];
-  if(id) db.operacionesProducto=db.operacionesProducto.map(x=>x.id===id?op:x);
-  else db.operacionesProducto.push(op);
-  saveDB(); closeModal('op-prod-modal'); renderProductos(); renderAhorro(); renderInversiones();
-}
-function delOperacionProducto(id){
-  if(!confirm('¿Eliminar esta operación individual?')) return;
-  db.operacionesProducto=(db.operacionesProducto||[]).filter(op=>op.id!==id);
-  saveDB(); renderProductos(); renderAhorro(); renderInversiones();
-}
 
 // ============================================================
 // TRASPASOS INTERNOS
@@ -1989,11 +2013,12 @@ function importJSON(input){
       const parsed=JSON.parse(e.target.result);
       // Validación básica de esquema
       if(typeof parsed!=='object'||Array.isArray(parsed)) throw new Error('Formato JSON no válido');
-      const validKeys=['movimientos','productos','seguimiento','traspasos','gastosPrevistos','ingresosPrevistos','categorias','catColores','metodos','grupos','objetivos','checklist','meta','config'];
+      const validKeys=['movimientos','productos','seguimiento','operaciones','traspasos','gastosPrevistos','ingresosPrevistos','categorias','catColores','metodos','grupos','objetivos','checklist','meta','config'];
       const hasValidKey=validKeys.some(k=>parsed[k]!==undefined);
       if(!hasValidKey) throw new Error('El archivo no parece ser una copia de seguridad de MisFinanzas');
       if(!confirm('¿Restaurar datos? Se reemplazarán todos los datos actuales.')) return;
       validKeys.forEach(k=>{if(parsed[k]!==undefined) db[k]=parsed[k];});
+      db.operaciones=db.operaciones||[];
       saveDB();showToast('Datos restaurados correctamente ✓','info');renderDashboard();renderDatos();
     }catch(err){showToast('Error al importar: '+err.message,'danger');}
   };
@@ -2065,7 +2090,7 @@ async function saveRevisionChecklist(){
 }
 async function resetAppData(){
   if(!confirm('¿Seguro que quieres borrar todos los datos locales de la app? Esta acción no se puede deshacer salvo que tengas una copia JSON.')) return;
-  db={movimientos:[],productos:[],seguimiento:[],operacionesProducto:[],traspasos:[],gastosPrevistos:[],ingresosPrevistos:[],categorias:['Vivienda','Alimentación','Transporte','Ocio','Salud','Mascota','Formación','Viajes','Suscripciones','Otros'],catColores:{Vivienda:'#e74c3c',Alimentación:'#f39c12',Transporte:'#3498db',Ocio:'#9b59b6',Salud:'#2ecc71',Mascota:'#1abc9c',Formación:'#e67e22',Viajes:'#16a085',Suscripciones:'#8e44ad',Otros:'#7f8c8d'},metodos:['Cuenta corriente','Tarjeta crédito','Efectivo','Bizum'],grupos:[],objetivos:{ahorro:0,inversion:0,patrimonio:0,emergencia:0},checklist:{},meta:{lastBackup:null,demoLoaded:false},config:{limites:{},alertas:{ahorro:true,gasto:true,inversion:true,colchon:3000}}};
+  db={movimientos:[],productos:[],seguimiento:[],operaciones:[],traspasos:[],gastosPrevistos:[],ingresosPrevistos:[],categorias:['Vivienda','Alimentación','Transporte','Ocio','Salud','Mascota','Formación','Viajes','Suscripciones','Otros'],catColores:{Vivienda:'#e74c3c',Alimentación:'#f39c12',Transporte:'#3498db',Ocio:'#9b59b6',Salud:'#2ecc71',Mascota:'#1abc9c',Formación:'#e67e22',Viajes:'#16a085',Suscripciones:'#8e44ad',Otros:'#7f8c8d'},metodos:['Cuenta corriente','Tarjeta crédito','Efectivo','Bizum'],grupos:[],objetivos:{ahorro:0,inversion:0,patrimonio:0,emergencia:0},checklist:{},meta:{lastBackup:null,demoLoaded:false},config:{limites:{},alertas:{ahorro:true,gasto:true,inversion:true,colchon:3000}}};
   await saveDB(); populateMonthSelects(); renderDashboard(); renderDatos(); showToast('Datos borrados. App lista para empezar desde cero.','info');
 }
 async function loadDemoManually(){
