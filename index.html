@@ -243,7 +243,7 @@ label{display:block;font-size:11px;color:var(--text3);margin-bottom:5px;text-tra
 
 <nav id="sidebar">
   <h1>💰 MisFinanzas</h1>
-  <p class="sub">Finanzas personales</p>
+  <p class="sub">Finanzas personales · versión operaciones corregidas</p>
   <div class="nav-item active" onclick="nav('dashboard')"><span class="icon">📊</span>Dashboard</div>
   <div class="nav-item" onclick="nav('movimientos')"><span class="icon">📝</span>Movimientos</div>
   <div class="nav-item" onclick="nav('gastosprevistos')"><span class="icon">🧾</span>Previsión</div>
@@ -567,24 +567,17 @@ label{display:block;font-size:11px;color:var(--text3);margin-bottom:5px;text-tra
   <div class="flex gap8 mt16"><button class="btn btn-primary" onclick="saveSeguimiento()">Guardar</button><button class="btn btn-ghost" onclick="closeModal('seg-modal')">Cancelar</button></div>
 </div></div>
 
-
-<!-- MODAL OPERACIÓN DE PRODUCTO -->
+<!-- MODAL OPERACIÓN PRODUCTO -->
 <div class="modal-bg" id="op-modal">
 <div class="modal">
-  <h3 id="op-modal-title">Nueva operación</h3>
+  <h3 id="op-modal-title">Nueva operación de producto</h3>
   <input type="hidden" id="op-id">
   <input type="hidden" id="op-prod-id">
-  <div class="form-row cols2">
-    <div><label>Fecha real</label><input type="date" id="op-fecha"></div>
-    <div><label>Mes de referencia</label><input type="month" id="op-mesref"></div>
-  </div>
-  <div class="form-row cols2">
-    <div><label>Tipo de operación</label><select id="op-tipo"><option value="aportacion">Aportación / entrada propia</option><option value="retirada">Retirada / salida propia</option><option value="interes">Intereses / rentabilidad abonada</option><option value="comision">Comisión / coste del producto</option></select></div>
-    <div><label>Importe (€)</label><input type="number" id="op-importe" step="0.01" placeholder="0.00" min="0"></div>
-  </div>
-  <div class="form-row"><label>Concepto</label><input type="text" id="op-concepto" placeholder="Ej: Intereses ING, aportación mensual, retirada a BBVA..."></div>
+  <div class="form-row cols2"><div><label>Fecha real</label><input type="date" id="op-fecha"></div><div><label>Mes de referencia</label><input type="month" id="op-mes-ref"></div></div>
+  <div class="form-row cols2"><div><label>Tipo de operación</label><select id="op-tipo"><option value="aportacion">Aportación</option><option value="retirada">Retirada</option><option value="intereses">Intereses / rentabilidad abonada</option><option value="comision">Comisión / coste</option></select></div><div><label>Importe (€)</label><input type="number" id="op-importe" step="0.01" placeholder="0.00" min="0"></div></div>
+  <div class="form-row"><label>Concepto</label><input type="text" id="op-concepto" placeholder="Ej: aportación mensual, intereses ING..."></div>
   <div class="form-row"><label>Comentario</label><textarea id="op-comentario"></textarea></div>
-  <div class="alert alert-info">Las operaciones quedan guardadas una a una. No se fusionan por mes. Las aportaciones y retiradas ajustan el capital aportado; los intereses aumentan rentabilidad; las comisiones la reducen.</div>
+  <div class="alert alert-info">Las operaciones se guardan una a una. No se fusionan por mes. Las aportaciones aumentan capital aportado; los intereses aumentan rentabilidad; las comisiones reducen rentabilidad.</div>
   <div class="flex gap8 mt16"><button class="btn btn-primary" onclick="saveOperacion()">Guardar operación</button><button class="btn btn-ghost" onclick="closeModal('op-modal')">Cancelar</button></div>
 </div></div>
 
@@ -686,7 +679,9 @@ async function loadDB() {
     // Validación de esquema: solo copiamos campos conocidos
     const validKeys = ['movimientos','productos','seguimiento','operaciones','traspasos','gastosPrevistos','ingresosPrevistos','categorias','catColores','metodos','grupos','objetivos','checklist','meta','config'];
     validKeys.forEach(k => { if (parsed[k] !== undefined) db[k] = parsed[k]; });
-    db.operaciones=db.operaciones||[];
+    if (!Array.isArray(db.operaciones)) db.operaciones = [];
+    if (!Array.isArray(db.traspasos)) db.traspasos = [];
+    if (!Array.isArray(db.seguimiento)) db.seguimiento = [];
   } catch(e) {
     console.warn('Error al cargar datos desde IndexedDB:', e);
     showToast('⚠️ No se pudieron cargar los datos locales. Revisa permisos del navegador.', 'warning');
@@ -795,37 +790,36 @@ function getTransferDelta(prodId, cutoffKey=null, afterKey=null) {
   },0);
 }
 
-
-function getOperacionKey(op) {
-  return op.mesReferencia || (op.fecha || '').slice(0,7);
-}
 function getOperacionesProducto(prodId, cutoffKey=null, afterKey=null) {
   return (db.operaciones||[]).filter(op=>{
-    const key=getOperacionKey(op);
     if(op.prodId!==prodId) return false;
+    const key = op.mesReferencia || (op.fecha||'').slice(0,7);
     if(cutoffKey && key>cutoffKey) return false;
     if(afterKey && key<=afterKey) return false;
     return true;
   });
 }
-function getOperacionCapitalDelta(prodId, cutoffKey=null, afterKey=null) {
+function getOperacionValueDelta(prodId, cutoffKey=null, afterKey=null) {
   return getOperacionesProducto(prodId, cutoffKey, afterKey).reduce((sum,op)=>{
+    const imp=parseFloat(op.importe)||0;
+    if(op.tipo==='aportacion' || op.tipo==='intereses') return sum+imp;
+    if(op.tipo==='retirada' || op.tipo==='comision') return sum-imp;
+    return sum;
+  },0);
+}
+function getOperacionCapitalDelta(prodId, cutoffKey=null) {
+  return getOperacionesProducto(prodId, cutoffKey).reduce((sum,op)=>{
     const imp=parseFloat(op.importe)||0;
     if(op.tipo==='aportacion') return sum+imp;
     if(op.tipo==='retirada') return sum-imp;
     return sum;
   },0);
 }
-function getOperacionValueDelta(prodId, cutoffKey=null, afterKey=null) {
-  return getOperacionesProducto(prodId, cutoffKey, afterKey).reduce((sum,op)=>{
-    const imp=parseFloat(op.importe)||0;
-    if(op.tipo==='aportacion' || op.tipo==='interes') return sum+imp;
-    if(op.tipo==='retirada' || op.tipo==='comision') return sum-imp;
-    return sum;
-  },0);
-}
 function getInteresesProducto(prodId, cutoffKey=null) {
-  return getOperacionesProducto(prodId, cutoffKey).reduce((sum,op)=> sum + (op.tipo==='interes' ? (parseFloat(op.importe)||0) : 0), 0);
+  return getOperacionesProducto(prodId, cutoffKey).filter(op=>op.tipo==='intereses').reduce((s,op)=>s+(parseFloat(op.importe)||0),0);
+}
+function getComisionesProducto(prodId, cutoffKey=null) {
+  return getOperacionesProducto(prodId, cutoffKey).filter(op=>op.tipo==='comision').reduce((s,op)=>s+(parseFloat(op.importe)||0),0);
 }
 
 // Capital total ajustado por traspasos internos.
@@ -1511,6 +1505,8 @@ function renderProductos(){
     const val=getValorProducto(p);
     const rent=val-ap;
     const rentPct=ap>0?(rent/ap*100):0;
+    const ops=(db.operaciones||[]).filter(op=>op.prodId===p.id).sort((a,b)=>String(b.fecha||'').localeCompare(String(a.fecha||'')) || String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+    const opsRows=ops.slice(0,12);
 
     // Tabla de seguimiento: cálculo correcto de capital acumulado por fila
     const segsAsc=[...segs].reverse(); // orden cronológico
@@ -1527,7 +1523,7 @@ function renderProductos(){
     return `<div class="panel mb16">
       <div class="flex jcsb mb16">
         <div><div style="font-size:16px;font-weight:600">${escHtml(p.nombre)}</div><div style="font-size:12px;color:var(--text3)">${tipoLabels[p.tipo]||p.tipo} · ${escHtml(p.entidad||'—')}${p.isin?' · '+escHtml(p.isin):''} · ${fiscalidadLabel[p.fiscalidad||'no_indicada']||'Fiscalidad no indicada'}</div></div>
-        <div class="flex gap8"><span class="badge ${riesgoCls[p.riesgo]}">${riesgoLabel[p.riesgo]||p.riesgo}</span><button class="btn btn-primary btn-sm" onclick="openOperacionModal('${p.id}')">+ Operación</button><button class="btn btn-ghost btn-sm" onclick="openSegModal('${p.id}')">+ Valor mensual</button><button class="icon-btn" onclick="editProducto('${p.id}')">✏️</button><button class="icon-btn" onclick="delProducto('${p.id}')">🗑️</button></div>
+        <div class="flex gap8"><span class="badge ${riesgoCls[p.riesgo]}">${riesgoLabel[p.riesgo]||p.riesgo}</span><button class="btn btn-success btn-sm" onclick="openOpModal('${p.id}')">+ Operación</button><button class="btn btn-primary btn-sm" onclick="openSegModal('${p.id}')">+ Valor mensual</button><button class="icon-btn" onclick="editProducto('${p.id}')">✏️</button><button class="icon-btn" onclick="delProducto('${p.id}')">🗑️</button></div>
       </div>
       <div class="cards mb16">
         <div class="card amber"><div class="label">Capital aportado</div><div class="value">${fmt(ap)}</div></div>
@@ -1535,94 +1531,12 @@ function renderProductos(){
         <div class="card ${rent>=0?'green':'red'}"><div class="label">Rentabilidad €</div><div class="value">${rent>=0?'+':''}${fmt(rent)}</div></div>
         <div class="card ${rentPct>=0?'green':'red'}"><div class="label">Rentabilidad %</div><div class="value">${rentPct>=0?'+':''}${fmtPct(rentPct)}</div></div>
       </div>
-      <h4 style="margin:10px 0 8px">Operaciones individuales</h4>
-      ${renderOperacionesProducto(p.id)}
-      <h4 style="margin:18px 0 8px">Valoración mensual</h4>
-      ${segRows.length?`<table><thead><tr><th>Mes/Año</th><th>Aportación mes</th><th>Capital ajustado</th><th>Valor mercado</th><th>Rent. €</th><th>Rent. %</th><th></th></tr></thead><tbody>${segRows.map(({sg,apHasta,r,rp})=>`<tr><td>${MESES[sg.mes-1]} ${sg.anio}</td><td>${fmt(parseFloat(sg.aportacion)||0)}</td><td>${fmt(apHasta)}</td><td>${fmt(parseFloat(sg.valorMercado)||0)}</td><td class="${r>=0?'text-green':'text-red'}">${r>=0?'+':''}${fmt(r)}</td><td class="${rp>=0?'text-green':'text-red'}">${rp>=0?'+':''}${fmtPct(rp)}</td><td><button class="icon-btn" onclick="delSeg('${sg.id}')">🗑️</button></td></tr>`).join('')}</tbody></table>`:`<div class="empty" style="padding:16px">Sin valoraciones mensuales aún.</div>`}
+      <h3 style="margin-top:4px">Operaciones individuales</h3>
+      ${opsRows.length?`<table><thead><tr><th>Fecha</th><th>Mes ref.</th><th>Tipo</th><th>Concepto</th><th>Importe</th><th>Comentario</th><th></th></tr></thead><tbody>${opsRows.map(op=>`<tr><td>${op.fecha||'—'}</td><td>${op.mesReferencia||((op.fecha||'').slice(0,7))||'—'}</td><td>${opTipoLabel(op.tipo)}</td><td>${escHtml(op.concepto||'—')}</td><td class="${(op.tipo==='retirada'||op.tipo==='comision')?'text-red':'text-green'}">${(op.tipo==='retirada'||op.tipo==='comision')?'-':'+'}${fmt(parseFloat(op.importe)||0)}</td><td>${escHtml(op.comentario||'')}</td><td><button class="icon-btn" onclick="editOperacion('${op.id}')">✏️</button><button class="icon-btn" onclick="delOperacion('${op.id}')">🗑️</button></td></tr>`).join('')}</tbody></table>`:`<div class="empty" style="padding:12px">Sin operaciones individuales. Usa “+ Operación” para registrar aportaciones, intereses, comisiones o retiradas.</div>`}
+      <h3 style="margin-top:18px">Valoración mensual</h3>
+      ${segRows.length?`<table><thead><tr><th>Mes/Año</th><th>Aportación mensual</th><th>Capital ajustado</th><th>Valor mercado</th><th>Rent. €</th><th>Rent. %</th><th></th></tr></thead><tbody>${segRows.map(({sg,apHasta,r,rp})=>`<tr><td>${MESES[sg.mes-1]} ${sg.anio}</td><td>${fmt(parseFloat(sg.aportacion)||0)}</td><td>${fmt(apHasta)}</td><td>${fmt(parseFloat(sg.valorMercado)||0)}</td><td class="${r>=0?'text-green':'text-red'}">${r>=0?'+':''}${fmt(r)}</td><td class="${rp>=0?'text-green':'text-red'}">${rp>=0?'+':''}${fmtPct(rp)}</td><td><button class="icon-btn" onclick="delSeg('${sg.id}')">🗑️</button></td></tr>`).join('')}</tbody></table>`:`<div class="empty" style="padding:16px">Sin valoraciones mensuales aún.</div>`}
     </div>`;
   }).join('');
-}
-
-
-function opTipoLabel(tipo){
-  return ({aportacion:'Aportación',retirada:'Retirada',interes:'Intereses',comision:'Comisión'})[tipo] || tipo;
-}
-function opSignedAmount(op){
-  const imp=parseFloat(op.importe)||0;
-  if(op.tipo==='retirada' || op.tipo==='comision') return -imp;
-  return imp;
-}
-function renderOperacionesProducto(prodId){
-  db.operaciones=db.operaciones||[];
-  const ops=db.operaciones.filter(o=>o.prodId===prodId).sort((a,b)=>String(b.fecha||'').localeCompare(String(a.fecha||'')) || String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
-  if(!ops.length) return `<div class="empty" style="padding:16px">Sin operaciones individuales. Usa <strong>+ Operación</strong> para registrar aportaciones, intereses, retiradas o comisiones sin fusionarlas por mes.</div>`;
-  return `<table><thead><tr><th>Fecha real</th><th>Mes ref.</th><th>Tipo</th><th>Concepto</th><th>Importe</th><th>Comentario</th><th></th></tr></thead><tbody>${ops.map(op=>{
-    const signed=opSignedAmount(op);
-    return `<tr><td>${op.fecha||'—'}</td><td>${op.mesReferencia||((op.fecha||'').slice(0,7))||'—'}</td><td>${opTipoLabel(op.tipo)}</td><td>${escHtml(op.concepto||'—')}</td><td class="${signed>=0?'text-green':'text-red'}">${signed>=0?'+':''}${fmt(signed)}</td><td>${escHtml(op.comentario||'')}</td><td><button class="icon-btn" onclick="editOperacion('${op.id}')">✏️</button><button class="icon-btn" onclick="delOperacion('${op.id}')">🗑️</button></td></tr>`;
-  }).join('')}</tbody></table>`;
-}
-function openOperacionModal(prodId, opId=null){
-  db.operaciones=db.operaciones||[];
-  const p=db.productos.find(x=>x.id===prodId);
-  if(!p){showToast('No se encuentra el producto','danger');return;}
-  document.getElementById('op-prod-id').value=prodId;
-  document.getElementById('op-id').value=opId||'';
-  if(opId){
-    const op=db.operaciones.find(x=>x.id===opId);
-    if(!op){showToast('No se encuentra la operación','danger');return;}
-    document.getElementById('op-modal-title').textContent='Editar operación — '+p.nombre;
-    document.getElementById('op-fecha').value=op.fecha||new Date().toISOString().split('T')[0];
-    document.getElementById('op-mesref').value=op.mesReferencia||((op.fecha||'').slice(0,7));
-    document.getElementById('op-tipo').value=op.tipo||'aportacion';
-    document.getElementById('op-importe').value=op.importe||0;
-    document.getElementById('op-concepto').value=op.concepto||'';
-    document.getElementById('op-comentario').value=op.comentario||'';
-  }else{
-    const hoy=new Date().toISOString().split('T')[0];
-    document.getElementById('op-modal-title').textContent='Nueva operación — '+p.nombre;
-    document.getElementById('op-fecha').value=hoy;
-    document.getElementById('op-mesref').value=hoy.slice(0,7);
-    document.getElementById('op-tipo').value=(p.tipo==='cuenta_remunerada')?'interes':'aportacion';
-    document.getElementById('op-importe').value='';
-    document.getElementById('op-concepto').value='';
-    document.getElementById('op-comentario').value='';
-  }
-  openModal('op-modal');
-}
-function editOperacion(opId){
-  const op=(db.operaciones||[]).find(x=>x.id===opId);
-  if(!op){showToast('No se encuentra la operación','danger');return;}
-  openOperacionModal(op.prodId, opId);
-}
-function saveOperacion(){
-  db.operaciones=db.operaciones||[];
-  const prodId=document.getElementById('op-prod-id').value;
-  const id=document.getElementById('op-id').value;
-  const fecha=document.getElementById('op-fecha').value;
-  const importe=parseFloat(document.getElementById('op-importe').value);
-  if(!prodId||!db.productos.some(p=>p.id===prodId)){showToast('Selecciona un producto válido','warning');return;}
-  if(!fecha){showToast('La fecha es obligatoria','warning');return;}
-  if(isNaN(importe)||importe<=0){showToast('El importe debe ser mayor que cero','warning');return;}
-  const op={
-    id:id||uid(),
-    prodId,
-    fecha,
-    mesReferencia:document.getElementById('op-mesref').value||fecha.slice(0,7),
-    tipo:document.getElementById('op-tipo').value,
-    importe,
-    concepto:document.getElementById('op-concepto').value.trim(),
-    comentario:document.getElementById('op-comentario').value,
-    createdAt:id?((db.operaciones.find(x=>x.id===id)||{}).createdAt||new Date().toISOString()):new Date().toISOString(),
-    updatedAt:new Date().toISOString()
-  };
-  if(id) db.operaciones=db.operaciones.map(x=>x.id===id?op:x);
-  else db.operaciones.push(op);
-  saveDB();closeModal('op-modal');renderProductos();renderDashboard();
-}
-function delOperacion(id){
-  if(!confirm('¿Eliminar esta operación del producto?'))return;
-  db.operaciones=(db.operaciones||[]).filter(o=>o.id!==id);
-  saveDB();renderProductos();renderDashboard();
 }
 
 function openProdModal(id){
@@ -1642,14 +1556,14 @@ function openProdModal(id){
     document.getElementById('prod-modal-title').textContent='Nuevo producto financiero';
     ['prod-nombre','prod-entidad','prod-isin','prod-comentario'].forEach(i=>document.getElementById(i).value='');
     document.getElementById('prod-capital').value=0;
-    document.getElementById('prod-tipo').value='cuenta_corriente';
+    document.getElementById('prod-tipo').value='fondo_indexado';
     document.getElementById('prod-riesgo').value='bajo';
     document.getElementById('prod-fiscalidad').value='no_indicada';
   }
   openModal('prod-modal');
 }
 function editProducto(id){openProdModal(id);}
-function delProducto(id){if(!confirm('¿Eliminar este producto y todo su seguimiento?'))return;db.productos=db.productos.filter(p=>p.id!==id);db.seguimiento=db.seguimiento.filter(s=>s.prodId!==id);db.operaciones=(db.operaciones||[]).filter(o=>o.prodId!==id);saveDB();renderProductos();}
+function delProducto(id){if(!confirm('¿Eliminar este producto y todo su seguimiento?'))return;db.productos=db.productos.filter(p=>p.id!==id);db.seguimiento=db.seguimiento.filter(s=>s.prodId!==id);db.operaciones=(db.operaciones||[]).filter(op=>op.prodId!==id);saveDB();renderProductos();}
 function saveProducto(){
   const nombre=document.getElementById('prod-nombre').value.trim();
   if(!nombre){showToast('El nombre del producto no puede estar vacío','warning');return;}
@@ -1703,6 +1617,69 @@ function saveSeguimiento(){
 }
 function delSeg(id){if(!confirm('¿Eliminar este registro?'))return;db.seguimiento=db.seguimiento.filter(s=>s.id!==id);saveDB();renderProductos();}
 
+
+
+const opLabels={aportacion:'Aportación',retirada:'Retirada',intereses:'Intereses',comision:'Comisión'};
+function opTipoLabel(t){return opLabels[t]||t||'—';}
+function openOpModal(prodId, opId=null){
+  const p=db.productos.find(x=>x.id===prodId);
+  if(!p){showToast('No se ha encontrado el producto','warning');return;}
+  document.getElementById('op-prod-id').value=prodId;
+  document.getElementById('op-id').value=opId||'';
+  const today=new Date().toISOString().split('T')[0];
+  if(opId){
+    const op=(db.operaciones||[]).find(x=>x.id===opId);
+    if(!op){showToast('No se ha encontrado la operación','warning');return;}
+    document.getElementById('op-modal-title').textContent='Editar operación — '+p.nombre;
+    document.getElementById('op-fecha').value=op.fecha||today;
+    document.getElementById('op-mes-ref').value=op.mesReferencia||(op.fecha||today).slice(0,7);
+    document.getElementById('op-tipo').value=op.tipo||'aportacion';
+    document.getElementById('op-importe').value=op.importe||0;
+    document.getElementById('op-concepto').value=op.concepto||'';
+    document.getElementById('op-comentario').value=op.comentario||'';
+  }else{
+    document.getElementById('op-modal-title').textContent='Nueva operación — '+p.nombre;
+    document.getElementById('op-fecha').value=today;
+    document.getElementById('op-mes-ref').value=today.slice(0,7);
+    document.getElementById('op-tipo').value='aportacion';
+    document.getElementById('op-importe').value='';
+    document.getElementById('op-concepto').value='';
+    document.getElementById('op-comentario').value='';
+  }
+  openModal('op-modal');
+}
+function editOperacion(id){
+  const op=(db.operaciones||[]).find(x=>x.id===id);
+  if(!op){showToast('No se ha encontrado la operación','warning');return;}
+  openOpModal(op.prodId,id);
+}
+function saveOperacion(){
+  const prodId=document.getElementById('op-prod-id').value;
+  const fecha=document.getElementById('op-fecha').value;
+  const mesReferencia=document.getElementById('op-mes-ref').value || (fecha||'').slice(0,7);
+  const tipo=document.getElementById('op-tipo').value;
+  const importe=parseFloat(document.getElementById('op-importe').value);
+  if(!prodId){showToast('Falta el producto','warning');return;}
+  if(!fecha){showToast('La fecha es obligatoria','warning');return;}
+  if(isNaN(importe)||importe<=0){showToast('El importe debe ser mayor que cero','warning');return;}
+  const id=document.getElementById('op-id').value;
+  const op={
+    id:id||uid(),prodId,fecha,mesReferencia,tipo,importe,
+    concepto:document.getElementById('op-concepto').value.trim(),
+    comentario:document.getElementById('op-comentario').value.trim(),
+    createdAt:id?((db.operaciones||[]).find(x=>x.id===id)||{}).createdAt:new Date().toISOString(),
+    updatedAt:new Date().toISOString()
+  };
+  db.operaciones=db.operaciones||[];
+  if(id) db.operaciones=db.operaciones.map(x=>x.id===id?op:x);
+  else db.operaciones.push(op);
+  saveDB();closeModal('op-modal');renderProductos();renderDashboard();
+}
+function delOperacion(id){
+  if(!confirm('¿Eliminar esta operación?'))return;
+  db.operaciones=(db.operaciones||[]).filter(op=>op.id!==id);
+  saveDB();renderProductos();renderDashboard();
+}
 
 // ============================================================
 // TRASPASOS INTERNOS
@@ -2018,7 +1995,6 @@ function importJSON(input){
       if(!hasValidKey) throw new Error('El archivo no parece ser una copia de seguridad de MisFinanzas');
       if(!confirm('¿Restaurar datos? Se reemplazarán todos los datos actuales.')) return;
       validKeys.forEach(k=>{if(parsed[k]!==undefined) db[k]=parsed[k];});
-      db.operaciones=db.operaciones||[];
       saveDB();showToast('Datos restaurados correctamente ✓','info');renderDashboard();renderDatos();
     }catch(err){showToast('Error al importar: '+err.message,'danger');}
   };
