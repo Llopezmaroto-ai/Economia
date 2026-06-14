@@ -779,6 +779,7 @@ function fechaDesdeMesDia(y,m,dia) {
 function closeModal(id){document.getElementById(id).classList.remove('open');}
 function openModal(id){document.getElementById(id).classList.add('open');}
 let charts={};
+let expandedOpsProducts = new Set();
 function destroyChart(id){if(charts[id]){charts[id].destroy();delete charts[id];}}
 function buildChart(id,cfg){destroyChart(id);const el=document.getElementById(id);if(!el)return;charts[id]=new Chart(el,cfg);}
 
@@ -926,6 +927,43 @@ function getMovimientoCuentaProdId(mv) {
   const norm = String(mv.metodo).trim().toLowerCase();
   const p = db.productos.find(x => productoPuedeSerCuenta(x) && String(x.nombre||'').trim().toLowerCase()===norm);
   return p ? p.id : '';
+}
+function getCuentaOperativaId(){
+  if(db.config && db.config.cuentaOperativaId && (db.productos||[]).some(p=>p.id===db.config.cuentaOperativaId)) return db.config.cuentaOperativaId;
+  const byName=(db.productos||[]).find(p=>/bbva/i.test((p.nombre||'')+' '+(p.entidad||'')));
+  if(byName) return byName.id;
+  const cc=(db.productos||[]).find(p=>p.tipo==='cuenta_corriente');
+  return cc ? cc.id : '';
+}
+function getCuentaOperativa(){
+  const id=getCuentaOperativaId();
+  return (db.productos||[]).find(p=>p.id===id)||null;
+}
+function getTraspasosCuentaOperativaMes(y,m){
+  const cuentaId=getCuentaOperativaId();
+  if(!cuentaId) return [];
+  const key=ym2str(y,m);
+  return (db.traspasos||[])
+    .filter(t=>((t.fecha||'').slice(0,7)===key) && (t.origenProdId===cuentaId || t.destinoProdId===cuentaId))
+    .map(t=>{
+      const origen=(db.productos||[]).find(p=>p.id===t.origenProdId);
+      const destino=(db.productos||[]).find(p=>p.id===t.destinoProdId);
+      const entrada=t.destinoProdId===cuentaId;
+      return {
+        id:'transfer-'+t.id,
+        transferId:t.id,
+        fecha:t.fecha,
+        mesReferencia:(t.fecha||'').slice(0,7),
+        tipo:'traspaso_interno',
+        concepto: entrada ? `Traspaso desde ${origen?origen.nombre:'producto eliminado'}` : `Traspaso a ${destino?destino.nombre:'producto eliminado'}`,
+        categoria:'Traspaso interno',
+        metodo: entrada ? `${origen?origen.nombre:'Origen'} → ${destino?destino.nombre:'Cuenta operativa'}` : `${origen?origen.nombre:'Cuenta operativa'} → ${destino?destino.nombre:'Destino'}`,
+        importe: parseFloat(t.importe)||0,
+        direccion: entrada ? 'entrada' : 'salida',
+        comentario:t.comentario||'',
+        isTransferView:true
+      };
+    });
 }
 function buildMovementAccountOperation(mv) {
   const prodId = getMovimientoCuentaProdId(mv);
@@ -1188,21 +1226,36 @@ function renderMovimientos() {
   const selVal=document.getElementById('mov-filter-month').value;
   const[y,m]=selVal.split('-').map(Number);
   const movs=movsOfMonth(y,m);
+  const transferRows=getTraspasosCuentaOperativaMes(y,m);
+  const rows=[...movs, ...transferRows];
+  const cuentaOp=getCuentaOperativa();
   const ingresos=movs.filter(m=>m.tipo==='ingreso').reduce((s,m)=>s+(parseFloat(m.importe)||0),0);
   const gastos=movs.filter(m=>m.tipo==='gasto').reduce((s,m)=>s+(parseFloat(m.importe)||0),0);
   const aportaciones=movs.filter(m=>m.tipo==='aportacion').reduce((s,m)=>s+(parseFloat(m.importe)||0),0);
+  const trIn=transferRows.filter(t=>t.direccion==='entrada').reduce((s,t)=>s+(parseFloat(t.importe)||0),0);
+  const trOut=transferRows.filter(t=>t.direccion==='salida').reduce((s,t)=>s+(parseFloat(t.importe)||0),0);
   const ahorroNeto=ingresos-gastos;
   document.getElementById('mov-summary').innerHTML=`
     <div class="card green"><div class="label">Ingresos</div><div class="value">${fmt(ingresos)}</div></div>
     <div class="card red"><div class="label">Gastos reales</div><div class="value">${fmt(gastos)}</div></div>
     <div class="card blue"><div class="label">Ahorro neto</div><div class="value">${fmt(ahorroNeto)}</div><div class="sub">(ingresos − gastos)</div></div>
-    <div class="card purple"><div class="label">Aportaciones</div><div class="value">${fmt(aportaciones)}</div><div class="sub">No computan como gasto</div></div>`;
-  const tipoBadge={ingreso:'badge-green',gasto:'badge-red',ahorro:'badge-blue',aportacion:'badge-purple'};
-  const tipoLabel={ingreso:'Ingreso',gasto:'Gasto',ahorro:'Ahorro',aportacion:'Aportación'};
-  const sorted=[...movs].sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
-  if(!sorted.length){document.getElementById('mov-table-wrap').innerHTML=`<div class="empty">No hay movimientos este mes</div>`;return;}
-  document.getElementById('mov-table-wrap').innerHTML=`<table><thead><tr><th>Fecha real</th><th>Mes ref.</th><th>Concepto</th><th>Tipo</th><th>Categoría</th><th>Importe</th><th>Método</th><th>Cuenta afectada</th><th></th></tr></thead><tbody>${sorted.map(m=>{const cp=db.productos.find(p=>p.id===(m.cuentaProdId||getMovimientoCuentaProdId(m)));return `<tr><td>${m.fecha}</td><td>${getMovRefKey(m)}</td><td>${escHtml(m.concepto)}</td><td><span class="badge ${tipoBadge[m.tipo]||'badge-blue'}">${tipoLabel[m.tipo]||m.tipo}</span></td><td>${escHtml(m.categoria||'')}</td><td class="${m.tipo==='gasto'?'text-red':m.tipo==='ingreso'?'text-green':'text-blue'}">${m.tipo==='gasto'?'-':m.tipo==='ingreso'?'+':''}${fmt(parseFloat(m.importe)||0)}</td><td style="color:var(--text3)">${escHtml(m.metodo||'')}</td><td>${cp?escHtml(cp.nombre):'—'}</td><td><button class="icon-btn" title="Duplicar" onclick="duplicateMovimiento('${m.id}')">📄</button><button class="icon-btn" title="Editar" onclick="editMovimiento('${m.id}')">✏️</button><button class="icon-btn" title="Eliminar" onclick="delMovimiento('${m.id}')">🗑️</button></td></tr>`}).join('')}</tbody></table>`;
+    <div class="card purple"><div class="label">Aportaciones</div><div class="value">${fmt(aportaciones)}</div><div class="sub">No computan como gasto</div></div>
+    <div class="card teal"><div class="label">Traspasos entrantes ${cuentaOp?escHtml(cuentaOp.nombre):'cuenta operativa'}</div><div class="value">${fmt(trIn)}</div><div class="sub">No son ingresos</div></div>
+    <div class="card amber"><div class="label">Traspasos salientes ${cuentaOp?escHtml(cuentaOp.nombre):'cuenta operativa'}</div><div class="value">${fmt(trOut)}</div><div class="sub">No son gastos</div></div>`;
+  const tipoBadge={ingreso:'badge-green',gasto:'badge-red',ahorro:'badge-blue',aportacion:'badge-purple',traspaso_interno:'badge-blue'};
+  const tipoLabel={ingreso:'Ingreso',gasto:'Gasto',ahorro:'Ahorro',aportacion:'Aportación',traspaso_interno:'Traspaso interno'};
+  const sorted=[...rows].sort((a,b)=>String(b.fecha||'').localeCompare(String(a.fecha||'')) || String(b.id||'').localeCompare(String(a.id||'')));
+  if(!sorted.length){document.getElementById('mov-table-wrap').innerHTML=`<div class="empty">No hay movimientos ni traspasos de la cuenta operativa este mes</div>`;return;}
+  document.getElementById('mov-table-wrap').innerHTML=`<table><thead><tr><th>Fecha real</th><th>Mes ref.</th><th>Concepto</th><th>Tipo</th><th>Categoría</th><th>Importe</th><th>Método / origen-destino</th><th>Cuenta afectada</th><th></th></tr></thead><tbody>${sorted.map(m=>{
+    const isTr=!!m.isTransferView;
+    const cp=isTr?cuentaOp:db.productos.find(p=>p.id===(m.cuentaProdId||getMovimientoCuentaProdId(m)));
+    const amountClass=isTr?(m.direccion==='salida'?'text-red':'text-green'):(m.tipo==='gasto'?'text-red':m.tipo==='ingreso'?'text-green':'text-blue');
+    const prefix=isTr?(m.direccion==='salida'?'-':'+'):(m.tipo==='gasto'?'-':m.tipo==='ingreso'?'+':'');
+    const actions=isTr?`<button class="icon-btn" title="Ver en Traspasos internos" onclick="nav('traspasos')">🔁</button>`:`<button class="icon-btn" title="Duplicar" onclick="duplicateMovimiento('${m.id}')">📄</button><button class="icon-btn" title="Editar" onclick="editMovimiento('${m.id}')">✏️</button><button class="icon-btn" title="Eliminar" onclick="delMovimiento('${m.id}')">🗑️</button>`;
+    return `<tr><td>${m.fecha}</td><td>${getMovRefKey(m)}</td><td>${escHtml(m.concepto)}</td><td><span class="badge ${tipoBadge[m.tipo]||'badge-blue'}">${tipoLabel[m.tipo]||m.tipo}</span></td><td>${escHtml(m.categoria||'')}</td><td class="${amountClass}">${prefix}${fmt(parseFloat(m.importe)||0)}</td><td style="color:var(--text3)">${escHtml(m.metodo||'')}</td><td>${cp?escHtml(cp.nombre):'—'}</td><td>${actions}</td></tr>`;
+  }).join('')}</tbody></table>`;
 }
+
 function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function openMovModal(id){
   populateCatSelect();populateMetodoSelect();populateCuentaProductoSelect();
@@ -1688,7 +1741,9 @@ function renderProductos(){
     const rent=st.r===null?0:st.r;
     const rentPct=st.rp===null?0:st.rp;
     const ops=(db.operaciones||[]).filter(op=>op.prodId===p.id).sort((a,b)=>String(b.fecha||'').localeCompare(String(a.fecha||'')) || String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
-    const opsRows=ops.slice(0,12);
+    const opsExpanded=expandedOpsProducts.has(p.id);
+    const opsRows=opsExpanded?ops:ops.slice(0,5);
+    const opsMoreBtn=ops.length>5?`<div class="mt12"><button class="btn btn-ghost btn-sm" onclick="toggleOperacionesProducto('${p.id}')">${opsExpanded?'Ver menos':'Ver más operaciones ('+(ops.length-5)+' más)'}</button></div>`:'';
 
     // Tabla de seguimiento: cálculo correcto de capital acumulado por fila
     const segsAsc=[...segs].reverse(); // orden cronológico
@@ -1709,13 +1764,18 @@ function renderProductos(){
       </div>
       ${productCardsHtml(p)}
       <h3 style="margin-top:4px">Operaciones individuales</h3>
-      ${opsRows.length?`<table><thead><tr><th>Fecha</th><th>Mes ref.</th><th>Tipo</th><th>Concepto</th><th>Importe</th><th>Comentario</th><th></th></tr></thead><tbody>${opsRows.map(op=>`<tr><td>${op.fecha||'—'}</td><td>${op.mesReferencia||((op.fecha||'').slice(0,7))||'—'}</td><td>${opTipoLabel(op.tipo)}${opIsTransfer(op)?' 🔁':''}</td><td>${escHtml(op.concepto||'—')}</td><td class="${opAmountClass(op)}">${opAmountPrefix(op)}${fmt(parseFloat(op.importe)||0)}</td><td>${escHtml(op.comentario||'')}</td><td>${opActionsHtml(op)}</td></tr>`).join('')}</tbody></table>`:`<div class="empty" style="padding:12px">Sin operaciones individuales. Usa “+ Operación” para registrar aportaciones, intereses, comisiones o retiradas. Los traspasos internos aparecerán aquí automáticamente.</div>`}
+      ${opsRows.length?`<table><thead><tr><th>Fecha</th><th>Mes ref.</th><th>Tipo</th><th>Concepto</th><th>Importe</th><th>Comentario</th><th></th></tr></thead><tbody>${opsRows.map(op=>`<tr><td>${op.fecha||'—'}</td><td>${op.mesReferencia||((op.fecha||'').slice(0,7))||'—'}</td><td>${opTipoLabel(op.tipo)}${opIsTransfer(op)?' 🔁':''}</td><td>${escHtml(op.concepto||'—')}</td><td class="${opAmountClass(op)}">${opAmountPrefix(op)}${fmt(parseFloat(op.importe)||0)}</td><td>${escHtml(op.comentario||'')}</td><td>${opActionsHtml(op)}</td></tr>`).join('')}</tbody></table>${opsMoreBtn}`:`<div class="empty" style="padding:12px">Sin operaciones individuales. Usa “+ Operación” para registrar aportaciones, intereses, comisiones o retiradas. Los traspasos internos aparecerán aquí automáticamente.</div>`}
       <h3 style="margin-top:18px">Valoración mensual</h3>
       ${segRows.length?`<table><thead><tr><th>Mes/Año</th><th>Capital ajustado</th><th>Valor mercado</th><th>Rent. €</th><th>Rent. %</th><th></th></tr></thead><tbody>${segRows.map(({sg,apHasta,r,rp})=>`<tr><td>${MESES[sg.mes-1]} ${sg.anio}</td><td>${fmt(apHasta)}</td><td>${fmt(parseFloat(sg.valorMercado)||0)}</td><td class="${r>=0?'text-green':'text-red'}">${r>=0?'+':''}${fmt(r)}</td><td class="${rp>=0?'text-green':'text-red'}">${rp>=0?'+':''}${fmtPct(rp)}</td><td><button class="icon-btn" onclick="delSeg('${sg.id}')">🗑️</button></td></tr>`).join('')}</tbody></table>`:`<div class="empty" style="padding:16px">Sin valoraciones mensuales aún.</div>`}
     </div>`;
   }).join('');
 }
 
+function toggleOperacionesProducto(prodId){
+  if(expandedOpsProducts.has(prodId)) expandedOpsProducts.delete(prodId);
+  else expandedOpsProducts.add(prodId);
+  renderProductos();
+}
 function openProdModal(id){
   document.getElementById('prod-id').value=id||'';
   if(id){
