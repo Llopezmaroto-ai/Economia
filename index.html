@@ -2613,5 +2613,269 @@ async function initApp() {
 initApp();
  
 </script>
+  <script>
+/*
+  Parche seguro para MisFinanzas · Dashboard + Capital actual + Informes sin aportaciones
+  Instrucción: pegar este bloque dentro de un <script> justo antes de </body>,
+  o guardar como archivo JS y cargarlo al final de index.html.
+
+  No sustituye la app completa: solo sobreescribe funciones de vista y mantiene intactos
+  movimientos, mes de referencia, previsión, traspasos, operaciones y datos existentes.
+*/
+(function(){
+  'use strict';
+
+  function safeNum(v){ return parseFloat(v) || 0; }
+  function money(v){ return (typeof fmt === 'function') ? fmt(v) : ((safeNum(v)).toFixed(2) + '€'); }
+  function pct(v){ return (typeof fmtPct === 'function') ? fmtPct(v) : ((safeNum(v)).toFixed(2) + '%'); }
+  function esc(v){ return (typeof escHtml === 'function') ? escHtml(v) : String(v ?? '').replace(/[&<>'"]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[s])); }
+  function ym(y,m){ return (typeof ym2str === 'function') ? ym2str(y,m) : `${y}-${String(m).padStart(2,'0')}`; }
+  function isInvestment(p){ return (window.TIPOS_INVERSION && TIPOS_INVERSION.has(p.tipo)) || ['fondo_indexado','fondo_activo','etf','acciones','fondo_monetario','inversion'].includes(p.tipo); }
+  function isSavedCapital(p){ return ['colchon','ahorro_conservador','cuenta_remunerada'].includes(p.tipo); }
+  function isCurrentAccount(p){ return p && p.tipo === 'cuenta_corriente'; }
+  function productValue(p){ return (typeof getValorProducto === 'function') ? getValorProducto(p) : safeNum(p.valorActual || p.capitalInicial); }
+  function productCapital(p){ return (typeof getCapitalTotalProducto === 'function') ? getCapitalTotalProducto(p) : safeNum(p.capitalInicial); }
+  function monthMovs(y,m){ return (typeof movsOfMonth === 'function') ? movsOfMonth(y,m) : (db.movimientos||[]).filter(x => (x.mesReferencia || (x.fecha||'').slice(0,7)) === ym(y,m)); }
+  function monthTransfers(y,m){
+    const key = ym(y,m);
+    return (db.traspasos || []).filter(t => (t.mesReferencia || (t.fecha || '').slice(0,7)) === key);
+  }
+  function productName(id){
+    const p=(db.productos||[]).find(x=>x.id===id);
+    return p ? p.nombre : 'Producto eliminado';
+  }
+  function opAccount(){
+    if (typeof getCuentaOperativa === 'function') return getCuentaOperativa();
+    if (db.config && db.config.cuentaOperativaId) return (db.productos||[]).find(p=>p.id===db.config.cuentaOperativaId) || null;
+    return (db.productos||[]).find(p=>/bbva/i.test((p.nombre||'')+' '+(p.entidad||''))) || (db.productos||[]).find(p=>p.tipo==='cuenta_corriente') || null;
+  }
+
+  function ensureCapitalPanel(){
+    const dash = document.getElementById('s-dashboard');
+    const cards = document.getElementById('dash-cards');
+    if(!dash || !cards) return null;
+    let panel = document.getElementById('dash-capital-current');
+    if(!panel){
+      panel = document.createElement('div');
+      panel.id = 'dash-capital-current';
+      panel.className = 'panel mb24';
+      panel.innerHTML = `
+        <div class="flex jcsb gap12 mb16">
+          <h3 style="margin:0">Capital actual</h3>
+          <div class="tabs" style="margin:0">
+            <div class="tab active" data-cap-tab="inversiones" onclick="switchDashCapitalTab('inversiones')">Inversiones</div>
+            <div class="tab" data-cap-tab="ahorro" onclick="switchDashCapitalTab('ahorro')">Capital ahorrado</div>
+            <div class="tab" data-cap-tab="patrimonio" onclick="switchDashCapitalTab('patrimonio')">Patrimonio</div>
+          </div>
+        </div>
+        <div id="dash-capital-content"></div>`;
+      cards.insertAdjacentElement('afterend', panel);
+    }
+    return panel;
+  }
+
+  window.switchDashCapitalTab = function(tab){
+    window._dashCapitalTab = tab || 'inversiones';
+    document.querySelectorAll('[data-cap-tab]').forEach(el => el.classList.toggle('active', el.getAttribute('data-cap-tab') === window._dashCapitalTab));
+    renderDashCapitalContent();
+  };
+
+  function renderProductRows(products, mode){
+    if(!products.length) return '<div class="empty">No hay productos en esta categoría.</div>';
+    return `<table><thead><tr><th>Producto</th><th>Tipo</th><th>Capital / base</th><th>Valor actual</th><th>Rentabilidad €</th><th>Rentabilidad %</th></tr></thead><tbody>${products.map(p=>{
+      const cap = productCapital(p);
+      const val = productValue(p);
+      let rent = val - cap;
+      let rentPct = cap > 0 ? rent / cap * 100 : 0;
+      if(p.tipo === 'cuenta_remunerada'){
+        const intereses = typeof getInteresesProducto === 'function' ? getInteresesProducto(p.id) : 0;
+        const comisiones = typeof getComisionesProducto === 'function' ? getComisionesProducto(p.id) : 0;
+        rent = intereses - comisiones;
+        const base = Math.max(1, Math.abs(val - rent));
+        rentPct = rent / base * 100;
+      }
+      if(isCurrentAccount(p)){
+        return `<tr><td>${esc(p.nombre)}</td><td>Cuenta corriente</td><td>—</td><td>${money(val)}</td><td>—</td><td>—</td></tr>`;
+      }
+      return `<tr><td>${esc(p.nombre)}</td><td>${esc((window.tipoLabels && tipoLabels[p.tipo]) || p.tipo || '')}</td><td>${mode==='investment' ? money(cap) : '—'}</td><td>${money(val)}</td><td class="${rent>=0?'text-green':'text-red'}">${rent>=0?'+':''}${money(rent)}</td><td class="${rentPct>=0?'text-green':'text-red'}">${rentPct>=0?'+':''}${pct(rentPct)}</td></tr>`;
+    }).join('')}</tbody></table>`;
+  }
+
+  window.renderDashCapitalContent = function(){
+    const wrap = document.getElementById('dash-capital-content');
+    if(!wrap) return;
+    const products = db.productos || [];
+    const inv = products.filter(isInvestment);
+    const savings = products.filter(isSavedCapital);
+    const accounts = products.filter(isCurrentAccount);
+    const invCapital = inv.reduce((s,p)=>s+productCapital(p),0);
+    const invValue = inv.reduce((s,p)=>s+productValue(p),0);
+    const invRent = invValue - invCapital;
+    const invPct = invCapital > 0 ? invRent / invCapital * 100 : 0;
+    const savingsValue = savings.reduce((s,p)=>s+productValue(p),0);
+    const accountsValue = accounts.reduce((s,p)=>s+productValue(p),0);
+    const patrimonio = typeof getPatrimonio === 'function' ? getPatrimonio() : products.reduce((s,p)=>s+productValue(p),0);
+    const tab = window._dashCapitalTab || 'inversiones';
+    document.querySelectorAll('[data-cap-tab]').forEach(el => el.classList.toggle('active', el.getAttribute('data-cap-tab') === tab));
+
+    if(tab === 'ahorro'){
+      wrap.innerHTML = `
+        <div class="cards">
+          <div class="card blue"><div class="label">Capital ahorrado</div><div class="value">${money(savingsValue)}</div><div class="sub">Colchón + ahorro conservador + cuentas remuneradas</div></div>
+          <div class="card teal"><div class="label">Productos incluidos</div><div class="value">${savings.length}</div></div>
+          <div class="card amber"><div class="label">Cuenta operativa</div><div class="value">${money(accountsValue)}</div><div class="sub">Cuentas corrientes separadas del ahorro</div></div>
+        </div>
+        ${renderProductRows(savings, 'savings')}`;
+      return;
+    }
+    if(tab === 'patrimonio'){
+      wrap.innerHTML = `
+        <div class="cards">
+          <div class="card blue"><div class="label">Patrimonio total</div><div class="value">${money(patrimonio)}</div></div>
+          <div class="card teal"><div class="label">Capital ahorrado</div><div class="value">${money(savingsValue)}</div></div>
+          <div class="card purple"><div class="label">Valor inversiones</div><div class="value">${money(invValue)}</div></div>
+          <div class="card green"><div class="label">Cuentas corrientes</div><div class="value">${money(accountsValue)}</div></div>
+        </div>
+        <table><thead><tr><th>Bloque</th><th>Importe</th><th>Notas</th></tr></thead><tbody>
+          <tr><td>Capital ahorrado</td><td>${money(savingsValue)}</td><td>Colchón, ahorro conservador y cuentas remuneradas</td></tr>
+          <tr><td>Inversiones</td><td>${money(invValue)}</td><td>Fondos, ETFs, acciones y productos de inversión</td></tr>
+          <tr><td>Cuentas corrientes</td><td>${money(accountsValue)}</td><td>Cuenta operativa y efectivo bancario</td></tr>
+        </tbody></table>`;
+      return;
+    }
+    wrap.innerHTML = `
+      <div class="cards">
+        <div class="card amber"><div class="label">Capital invertido</div><div class="value">${money(invCapital)}</div></div>
+        <div class="card teal"><div class="label">Valor inversiones</div><div class="value">${money(invValue)}</div></div>
+        <div class="card ${invRent>=0?'green':'red'}"><div class="label">Rentabilidad €</div><div class="value">${invRent>=0?'+':''}${money(invRent)}</div></div>
+        <div class="card ${invPct>=0?'green':'red'}"><div class="label">Rentabilidad %</div><div class="value">${invPct>=0?'+':''}${pct(invPct)}</div></div>
+      </div>
+      ${renderProductRows(inv, 'investment')}`;
+  };
+
+  function renderPatrimonioCharts(invValue){
+    try{
+      if(typeof getMonths === 'function' && typeof calcPatrimonioMes === 'function'){
+        const months = getMonths(12);
+        const patData = months.map(({y,m}) => calcPatrimonioMes(y,m));
+        buildChart('ch-pat',{type:'line',data:{labels:months.map(x=>x.label.substring(0,3)),datasets:[{data:patData,borderColor:'#4a9eff',backgroundColor:'rgba(74,158,255,0.1)',fill:true,tension:0.4,pointRadius:3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}}});
+      }
+      const ahorroVal = (typeof getAhorroTotalValor === 'function') ? getAhorroTotalValor() : (db.productos||[]).filter(isSavedCapital).reduce((s,p)=>s+productValue(p),0);
+      const cuentasVal = (db.productos||[]).filter(isCurrentAccount).reduce((s,p)=>s+productValue(p),0);
+      buildChart('ch-pat-dist',{type:'doughnut',data:{labels:['Capital ahorrado','Inversiones','Cuentas corrientes'],datasets:[{data:[ahorroVal,invValue,cuentasVal],backgroundColor:['#4a9eff','#9b59b6','#2ecc71'],hoverOffset:8}]},options:{responsive:true,maintainAspectRatio:false}});
+    }catch(e){ console.warn('Parche Dashboard: no se pudieron renderizar gráficos de patrimonio', e); }
+  }
+
+  window.renderDashboard = function(){
+    const sel = document.getElementById('month-select');
+    if(!sel || !sel.value) return;
+    const [ySel,mSel] = sel.value.split('-').map(Number);
+    const movs = monthMovs(ySel,mSel);
+    const transfers = monthTransfers(ySel,mSel);
+    const ingresos = movs.filter(m=>m.tipo==='ingreso').reduce((s,m)=>s+safeNum(m.importe),0);
+    const gastos = movs.filter(m=>m.tipo==='gasto').reduce((s,m)=>s+safeNum(m.importe),0);
+    const ahorroNeto = ingresos - gastos;
+    const pctAhorro = ingresos > 0 ? ahorroNeto / ingresos * 100 : 0;
+    const totalTraspasos = transfers.reduce((s,t)=>s+safeNum(t.importe),0);
+    const cuenta = opAccount();
+    const cuentaId = cuenta ? cuenta.id : '';
+    const trIn = transfers.filter(t=>t.destinoProdId===cuentaId).reduce((s,t)=>s+safeNum(t.importe),0);
+    const trOut = transfers.filter(t=>t.origenProdId===cuentaId).reduce((s,t)=>s+safeNum(t.importe),0);
+
+    const prev = new Date(ySel,mSel-2,1);
+    const prevMovs = monthMovs(prev.getFullYear(),prev.getMonth()+1);
+    const prevGastos = prevMovs.filter(m=>m.tipo==='gasto').reduce((s,m)=>s+safeNum(m.importe),0);
+    const alerts = [];
+    try{
+      if(db.config?.alertas?.gasto && gastos > prevGastos && prevGastos > 0) alerts.push({t:'warning',msg:`Gastos de este mes (${money(gastos)}) superiores al anterior (${money(prevGastos)}).`});
+      if(db.config?.alertas?.ahorro && db.objetivos?.ahorro > 0 && ahorroNeto < db.objetivos.ahorro) alerts.push({t:'warning',msg:`Ahorro neto (${money(ahorroNeto)}) por debajo del objetivo (${money(db.objetivos.ahorro)}).`});
+    }catch(e){}
+    const alertWrap = document.getElementById('dash-alerts');
+    if(alertWrap) alertWrap.innerHTML = alerts.map(a=>`<div class="alert alert-${a.t}">⚠️ ${a.msg}</div>`).join('');
+
+    const cards = [
+      {label:'Ingresos del mes',val:money(ingresos),cls:'green'},
+      {label:'Gastos del mes',val:money(gastos),cls:'red'},
+      {label:'Ahorro neto',val:money(ahorroNeto),cls:ahorroNeto>=0?'green':'red'},
+      {label:'% de ahorro',val:pct(pctAhorro),cls:'blue'},
+      {label:'Traspasos internos',val:money(totalTraspasos),cls:'teal',sub: cuenta ? `BBVA/cuenta operativa: +${money(trIn)} / -${money(trOut)}` : 'No computan como ingreso ni gasto'}
+    ];
+    const dc = document.getElementById('dash-cards');
+    if(dc) dc.innerHTML = cards.map(c=>`<div class="card ${c.cls}"><div class="label">${c.label}</div><div class="value">${c.val}</div>${c.sub?`<div class="sub">${c.sub}</div>`:''}</div>`).join('');
+
+    ensureCapitalPanel();
+    renderDashCapitalContent();
+
+    try{
+      buildChart('ch-igm',{type:'bar',data:{labels:['Ingresos','Gastos','Ahorro neto'],datasets:[{data:[ingresos,gastos,Math.max(0,ahorroNeto)],backgroundColor:['#2ecc71','#e74c3c','#4a9eff'],borderRadius:6}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}}});
+      const catMap={};
+      movs.filter(m=>m.tipo==='gasto').forEach(m=>{catMap[m.categoria || 'Sin categoría']=(catMap[m.categoria || 'Sin categoría']||0)+safeNum(m.importe);});
+      const catKeys=Object.keys(catMap);
+      buildChart('ch-cat',{type:'doughnut',data:{labels:catKeys.length?catKeys:['Sin gastos'],datasets:[{data:catKeys.length?catKeys.map(k=>catMap[k]):[1],backgroundColor:catKeys.length?catKeys.map(k=>db.catColores?.[k]||'#7f8c8d'):['#2a2a4a'],hoverOffset:8}]},options:{responsive:true,maintainAspectRatio:false}});
+      const invValue = (typeof getInversionValorActual === 'function') ? getInversionValorActual() : (db.productos||[]).filter(isInvestment).reduce((s,p)=>s+productValue(p),0);
+      renderPatrimonioCharts(invValue);
+    }catch(e){ console.warn('Parche Dashboard: error al renderizar gráficos', e); }
+  };
+
+  function postProcessNoAportaciones(){
+    // Quitar tarjeta o textos de aportaciones en Informes si la función antigua los genera.
+    document.querySelectorAll('#inf-anual-content .card').forEach(card=>{
+      const lab = (card.querySelector('.label')?.textContent || '').toLowerCase();
+      if(lab.includes('aportacion') || lab.includes('aportación')) card.remove();
+    });
+    // Quitar tarjeta de aportaciones en Movimientos, si existe en la versión base.
+    document.querySelectorAll('#mov-summary .card').forEach(card=>{
+      const lab = (card.querySelector('.label')?.textContent || '').toLowerCase();
+      if(lab.includes('aportacion') || lab.includes('aportación')) card.remove();
+    });
+    // Quitar opción antigua de movimiento tipo aportación para evitar duplicidades.
+    document.querySelectorAll('select option[value="aportacion"]').forEach(opt=>{
+      if(opt.closest('#mov-tipo')) opt.remove();
+    });
+    const csvNote = document.querySelector('#s-datos code');
+    document.querySelectorAll('#s-datos p').forEach(p=>{
+      if((p.textContent||'').includes('ingreso | gasto | ahorro | aportacion')){
+        p.innerHTML = 'Los tipos válidos son: <code style="background:var(--bg3);padding:2px 6px;border-radius:4px">ingreso | gasto | ahorro</code>. Las aportaciones a productos se registran como traspasos internos previstos o reales.';
+      }
+    });
+  }
+
+  const originalRenderInformes = window.renderInformes;
+  if(typeof originalRenderInformes === 'function'){
+    window.renderInformes = function(){
+      originalRenderInformes.apply(this, arguments);
+      postProcessNoAportaciones();
+    };
+  }
+  const originalRenderMovimientos = window.renderMovimientos;
+  if(typeof originalRenderMovimientos === 'function'){
+    window.renderMovimientos = function(){
+      originalRenderMovimientos.apply(this, arguments);
+      postProcessNoAportaciones();
+    };
+  }
+
+  function applyStaticTextFixes(){
+    postProcessNoAportaciones();
+    document.querySelectorAll('#s-revision .alert-info, #s-revision .help-note').forEach(el=>{
+      el.innerHTML = el.innerHTML
+        .replace(/, aportaciones/g, '')
+        .replace(/<strong>Aportación a inversión<\/strong> = traspaso interno desde una cuenta a un producto\.\s*/g, '')
+        .replace(/<strong>Aportación<\/strong> = dinero que pasa de efectivo a inversión\.\s*/g, '');
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', function(){
+    applyStaticTextFixes();
+    try { if(document.getElementById('s-dashboard')?.classList.contains('active')) renderDashboard(); } catch(e){ console.warn('Parche Dashboard: render inicial falló', e); }
+  });
+
+  window.addEventListener('load', function(){
+    applyStaticTextFixes();
+    try { if(document.getElementById('s-dashboard')?.classList.contains('active')) renderDashboard(); } catch(e){ console.warn('Parche Dashboard: render load falló', e); }
+  });
+})();
+
+</script>
 </body>
 </html>
